@@ -6,6 +6,7 @@ from redis import Redis
 from rq import Queue, Worker
 
 from app.config import get_settings
+from app.db.migrations import apply_migrations_from_settings
 from app.log_setup import configure_logging
 from app.workers.queue import get_worker_queue_names
 
@@ -15,6 +16,12 @@ logger = logging.getLogger("nas_diff.worker")
 def main() -> None:
     settings = get_settings()
     configure_logging(settings.log_level)
+
+    applied = apply_migrations_from_settings(settings)
+    if applied:
+        logger.info("Applied database migrations: %s", ", ".join(applied))
+    else:
+        logger.info("Database schema is up to date")
 
     queue_names = get_worker_queue_names(settings)
     redis_conn = Redis.from_url(settings.redis_url)
