@@ -1,4 +1,6 @@
 from app.db.repositories.actions import ActionItemPayload, ActionRepository
+from app.db.repositories.decisions import UserDecisionRepository
+from app.db.repositories.file_hashes import FileHashRepository
 from app.db.repositories.files import FileRepository
 from app.db.repositories.groups import ExactGroupMember, GroupRepository, SimilarGroupMember
 from app.db.repositories.scan_jobs import ScanJobRepository
@@ -12,6 +14,7 @@ __all__ = [
     "ActionItemPayload",
     "ActionRepository",
     "ExactGroupMember",
+    "FileHashRepository",
     "FileRepository",
     "GroupRepository",
     "ScanRootAlreadyExistsError",
@@ -19,4 +22,5 @@ __all__ = [
     "ScanJobRepository",
     "ScanRootRepository",
     "SimilarGroupMember",
+    "UserDecisionRepository",
 ]

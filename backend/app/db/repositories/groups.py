@@ -148,3 +148,11 @@ class GroupRepository:
         self.session.execute(delete(ExactGroup).where(ExactGroup.job_id == job_id))
         self.session.execute(delete(SimilarGroup).where(SimilarGroup.job_id == job_id))
         self.session.commit()
+
+    def delete_exact_groups_for_job(self, *, job_id: str) -> None:
+        self.session.execute(delete(ExactGroup).where(ExactGroup.job_id == job_id))
+        self.session.commit()
+
+    def delete_similar_groups_for_job(self, *, job_id: str) -> None:
+        self.session.execute(delete(SimilarGroup).where(SimilarGroup.job_id == job_id))
+        self.session.commit()

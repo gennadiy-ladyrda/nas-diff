@@ -7,11 +7,13 @@ from app.db.models import (
     Base,
     ExactGroup,
     ExactGroupItem,
+    FileHash,
     File,
     ScanJob,
     ScanRoot,
     SimilarGroup,
     SimilarGroupItem,
+    UserDecision,
 )
 from app.db.session import get_db_session, get_engine, get_session_factory, session_scope
 
@@ -21,11 +23,13 @@ __all__ = [
     "Base",
     "ExactGroup",
     "ExactGroupItem",
+    "FileHash",
     "File",
     "ScanJob",
     "ScanRoot",
     "SimilarGroup",
     "SimilarGroupItem",
+    "UserDecision",
     "apply_migrations",
     "apply_migrations_from_settings",
     "get_db_session",

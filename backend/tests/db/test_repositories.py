@@ -4,6 +4,8 @@ from sqlalchemy import text
 from sqlalchemy.orm import Session
 
 from app.db.repositories.actions import ActionItemPayload, ActionRepository
+from app.db.repositories.decisions import UserDecisionRepository
+from app.db.repositories.file_hashes import FileHashRepository
 from app.db.repositories.files import FileRepository
 from app.db.repositories.groups import ExactGroupMember, GroupRepository, SimilarGroupMember
 from app.db.repositories.scan_jobs import ScanJobRepository
@@ -147,3 +149,42 @@ def test_action_repository_batch_and_items(session: Session) -> None:
     updated_item = repo.update_item_status(items[0].id, status="done")
     assert updated_item.executed_at is not None
     assert updated_item.status == "done"
+
+
+def test_file_hash_repository_upsert(session: Session) -> None:
+    root_id, _ = seed_root_and_job(session)
+    file_id = _insert_file(session, root_id=root_id, rel_path="h.jpg", abs_path="/nas/photo/h.jpg")
+
+    repo = FileHashRepository(session)
+    created = repo.upsert(file_id=file_id, hash_type="blake3_full", hash_hex="abc")
+    assert created.hash_hex == "abc"
+
+    updated = repo.upsert(file_id=file_id, hash_type="blake3_full", hash_hex="def")
+    assert updated.id == created.id
+    assert updated.hash_hex == "def"
+
+
+def test_user_decision_repository_upsert(session: Session) -> None:
+    root_id, _ = seed_root_and_job(session)
+    file_id = _insert_file(session, root_id=root_id, rel_path="d.jpg", abs_path="/nas/photo/d.jpg")
+
+    repo = UserDecisionRepository(session)
+    created = repo.upsert(
+        group_kind="exact",
+        group_id=1,
+        file_id=file_id,
+        decision="keep",
+        note="first",
+    )
+    assert created.decision == "keep"
+    assert created.note == "first"
+
+    updated = repo.upsert(
+        group_kind="exact",
+        group_id=1,
+        file_id=file_id,
+        decision="trash",
+        note="override",
+    )
+    assert updated.id == created.id
+    assert updated.decision == "trash"

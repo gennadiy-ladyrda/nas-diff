@@ -5,7 +5,7 @@ from datetime import datetime, timezone
 from sqlalchemy import select
 from sqlalchemy.orm import Session
 
-from app.db.models import ScanJob
+from app.db.models import ScanJob, ScanJobRoot
 
 
 class ScanJobRepository:
@@ -21,6 +21,19 @@ class ScanJobRepository:
 
     def get(self, job_id: str) -> ScanJob | None:
         return self.session.get(ScanJob, job_id)
+
+    def add_roots(self, job_id: str, *, root_ids: list[int]) -> None:
+        payload = [ScanJobRoot(job_id=job_id, root_id=root_id) for root_id in root_ids]
+        self.session.add_all(payload)
+        self.session.commit()
+
+    def list_root_ids(self, job_id: str) -> list[int]:
+        stmt = (
+            select(ScanJobRoot.root_id)
+            .where(ScanJobRoot.job_id == job_id)
+            .order_by(ScanJobRoot.root_id.asc())
+        )
+        return list(self.session.scalars(stmt))
 
     def list_recent(self, *, limit: int = 50) -> list[ScanJob]:
         stmt = select(ScanJob).order_by(ScanJob.requested_at.desc()).limit(limit)

@@ -5,7 +5,7 @@
 ## 1. Общий статус проекта
 - Текущая стадия: базовая инфраструктура backend/worker поднята.
 - Продуктовый режим безопасности: `move_to_trash` по умолчанию, `HARD_DELETE_ENABLED=false`.
-- Ближайший фокус: реализация `API-02` (оркестрация scan jobs и статусы).
+- Ближайший фокус: реализация `ACT-01` (безопасные batch-действия и rollback).
 
 ## 2. Прогресс по backlog
 | Task | Статус | Комментарий |
@@ -13,11 +13,11 @@
 | INFRA-01 | done | Выполнен backend scaffold, Docker-окружение, health endpoint и worker startup. |
 | DB-01 | done | Реализованы миграции, ORM-модели и репозитории для ключевых сущностей. |
 | API-01 | done | Реализованы health и CRUD для `scan_roots` с валидацией путей и API-тестами. |
-| API-02 | todo | Ожидает API-01 и worker orchestration логики. |
-| CORE-01 | todo | Не начато. |
-| CORE-02 | todo | Не начато. |
-| CORE-03 | todo | Не начато. |
-| DECISION-01 | todo | Не начато. |
+| API-02 | done | Реализованы API scan jobs + очередь + endpoint выдачи групп/статусов. |
+| CORE-01 | done | Реализован файловый сканер с инкрементальной индексацией и `is_present`. |
+| CORE-02 | done | Реализована exact-дедупликация и метрика `reclaimable_bytes`. |
+| CORE-03 | done | Реализована similar-дедупликация (phash-like, Hamming threshold). |
+| DECISION-01 | done | Реализован auto-primary scoring и API сохранения пользовательских решений. |
 | ACT-01 | todo | Не начато. |
 | UI-01 | todo | Не начато. |
 | UI-02 | todo | Не начато. |
@@ -43,7 +43,7 @@
 - В рабочем каталоге может оставаться legacy-файл `data/nas_diff.db`; актуальный путь хранения БД перенесен в `~/.nas-diff/data`.
 
 ## 6. Следующий практический шаг
-- Выполнить `tasks/API-02.md`: реализовать `POST/GET` endpoint'ы scan jobs и интеграцию с worker queue.
+- Выполнить `tasks/ACT-01.md`: реализовать безопасные batch-действия (`move_to_trash/delete/restore`) и rollback.
 
 ## 7. Детали выполнения DB-01
 - Добавлен DB-layer на `SQLAlchemy 2.x`:
@@ -110,3 +110,45 @@
 - `PYTHONPYCACHEPREFIX=/tmp/python-pycache python3 -m compileall backend/app backend/tests` -> ok.
 - `docker compose config` -> ok.
 - `PYTHONPATH=. /tmp/nas-diff-venv/bin/python -m pytest -q` (backend) -> `10 passed`.
+
+## 14. Детали выполнения API-02
+- Добавлены endpoint'ы scan jobs:
+  - `POST /api/v1/scan/jobs`;
+  - `GET /api/v1/scan/jobs/{job_id}`;
+  - `GET /api/v1/scan/jobs/{job_id}/groups?kind=exact|similar`.
+- Добавлена интеграция с очередью:
+  - `ScanQueueClient` + `RQScanQueueClient`;
+  - enqueue в `scan_queue`;
+  - worker task `app.workers.scan_worker.process_scan_job`.
+- Добавлена идемпотентность создания job через `idempotency_key`.
+
+## 15. Детали выполнения CORE-01 / CORE-02 / CORE-03
+- CORE-01:
+  - модуль `core/scanner.py` для обхода scan roots;
+  - инкрементальная проверка изменений по `size/mtime/inode/dev`;
+  - обновление `files`, `file_hashes`, `is_present`, `last_seen_job_id`.
+- CORE-02:
+  - потоковый full-hash в `core/hasher_exact.py` (`blake3` при наличии, иначе fallback);
+  - построение exact-групп в `core/dedup_exact.py` по `blake3_full`;
+  - расчет `reclaimable_bytes`.
+- CORE-03:
+  - вычисление `dhash64/phash64` в `core/hasher_similar.py`;
+  - Hamming-distance и построение connected components в `core/dedup_similar.py`;
+  - сохранение `similar_groups` + `distance_to_anchor/confidence`.
+- Добавлен orchestration-слой `services/scan_orchestrator.py`, объединяющий scan + dedup + статус job.
+
+## 16. Детали выполнения DECISION-01
+- Добавлен `core/decision_engine.py`:
+  - scoring по правилам (`resolution`, `size`, `EXIF`, `mtime`);
+  - инвариант ровно одного `is_primary` на группу.
+- Добавлен `services/decision_service.py`:
+  - сохранение решений в `user_decisions`;
+  - ручной override primary при решении `keep`.
+- Добавлен API:
+  - `POST /api/v1/groups/{group_kind}/{group_id}/decision`;
+  - `GET /api/v1/groups/{group_kind}/{group_id}`.
+
+## 17. Проверки по API-02 / CORE-01 / CORE-02 / CORE-03 / DECISION-01
+- `PYTHONPYCACHEPREFIX=/tmp/python-pycache python3 -m compileall backend/app backend/tests` -> ok.
+- `docker compose config` -> ok.
+- `PYTHONPATH=. /tmp/nas-diff-venv/bin/python -m pytest -q` (backend) -> `18 passed`.

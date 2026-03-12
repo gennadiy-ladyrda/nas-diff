@@ -6,6 +6,49 @@
 
 ## [Unreleased]
 
+## [2026-03-13] API-02 + CORE-01/02/03 + DECISION-01 - Scan pipeline, dedup и решения пользователя
+
+### Added
+- API scan jobs:
+  - `POST /api/v1/scan/jobs`;
+  - `GET /api/v1/scan/jobs/{job_id}`;
+  - `GET /api/v1/scan/jobs/{job_id}/groups`.
+- API groups/decisions:
+  - `GET /api/v1/groups/{group_kind}/{group_id}`;
+  - `POST /api/v1/groups/{group_kind}/{group_id}/decision`.
+- Queue + worker scan pipeline:
+  - `ScanQueueClient` / `RQScanQueueClient`;
+  - `app.workers.scan_worker.process_scan_job`.
+- Core модули:
+  - `scanner.py` (инкрементальный обход и индексация);
+  - `hasher_exact.py`, `hasher_similar.py`;
+  - `dedup_exact.py`, `dedup_similar.py`;
+  - `decision_engine.py`.
+- Service layer:
+  - `scan_orchestrator.py`;
+  - `decision_service.py`.
+- DB repositories:
+  - `file_hashes.py`;
+  - `decisions.py`.
+- Тесты:
+  - `backend/tests/api/test_api_02_scan_jobs.py`;
+  - `backend/tests/api/test_decision_01_groups.py`;
+  - `backend/tests/core/test_core_pipeline.py`;
+  - `backend/tests/core/conftest.py`.
+
+### Changed
+- `backend/app/main.py`: подключены роуты scan и groups.
+- `backend/app/db/models.py`: добавлены ORM-модели `FileHash`, `UserDecision`.
+- `backend/app/db/repositories/scan_jobs.py`: добавлены операции связки job <-> roots.
+- `backend/app/db/repositories/groups.py`: раздельная очистка exact/similar групп.
+- `backend/tests/api/conftest.py`: добавлен in-memory queue override для интеграционных API-тестов.
+- `backend/tests/db/test_repositories.py`: добавлены тесты `FileHashRepository` и `UserDecisionRepository`.
+
+### Validation
+- `PYTHONPYCACHEPREFIX=/tmp/python-pycache python3 -m compileall backend/app backend/tests`.
+- `docker compose config`.
+- `PYTHONPATH=. /tmp/nas-diff-venv/bin/python -m pytest -q` (backend) -> `18 passed`.
+
 ## [2026-03-13] API-01 - Health и управление источниками сканирования
 
 ### Added
