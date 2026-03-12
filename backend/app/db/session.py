@@ -2,7 +2,7 @@ from __future__ import annotations
 
 from contextlib import contextmanager
 from functools import lru_cache
-from typing import Iterator
+from typing import Iterator, Optional
 
 from sqlalchemy import create_engine, event
 from sqlalchemy.engine import Engine
@@ -55,18 +55,18 @@ def _build_session_factory(database_url: str) -> sessionmaker[Session]:
     )
 
 
-def get_engine(settings: Settings | None = None) -> Engine:
+def get_engine(settings: Optional[Settings] = None) -> Engine:
     active_settings = settings or get_settings()
     return _build_engine(active_settings.database_url)
 
 
-def get_session_factory(settings: Settings | None = None) -> sessionmaker[Session]:
+def get_session_factory(settings: Optional[Settings] = None) -> sessionmaker[Session]:
     active_settings = settings or get_settings()
     return _build_session_factory(active_settings.database_url)
 
 
 @contextmanager
-def session_scope(settings: Settings | None = None) -> Iterator[Session]:
+def session_scope(settings: Optional[Settings] = None) -> Iterator[Session]:
     session = get_session_factory(settings)()
     try:
         yield session
@@ -78,8 +78,8 @@ def session_scope(settings: Settings | None = None) -> Iterator[Session]:
         session.close()
 
 
-def get_db_session(settings: Settings | None = None) -> Iterator[Session]:
-    session = get_session_factory(settings)()
+def get_db_session() -> Iterator[Session]:
+    session = get_session_factory()()
     try:
         yield session
     finally:

@@ -93,6 +93,24 @@ class File(Base):
     scan_root: Mapped[ScanRoot] = relationship(back_populates="files")
 
 
+class FileHash(Base):
+    __tablename__ = "file_hashes"
+    __table_args__ = (
+        UniqueConstraint("file_id", "hash_type", name="uq_file_hashes_file_hash_type"),
+        Index("idx_file_hashes_lookup", "hash_type", "hash_hex"),
+        CheckConstraint(
+            "hash_type IN ('blake3_full', 'dhash64', 'phash64')",
+            name="chk_file_hashes_hash_type",
+        ),
+    )
+
+    id: Mapped[int] = mapped_column(Integer, primary_key=True, autoincrement=True)
+    file_id: Mapped[int] = mapped_column(ForeignKey("files.id", ondelete="CASCADE"), nullable=False)
+    hash_type: Mapped[str] = mapped_column(String, nullable=False)
+    hash_hex: Mapped[str] = mapped_column(Text, nullable=False)
+    created_at: Mapped[str] = mapped_column(Text, nullable=False, server_default=text("(datetime('now'))"))
+
+
 class ExactGroup(Base):
     __tablename__ = "exact_groups"
     __table_args__ = (
@@ -162,6 +180,24 @@ class SimilarGroupItem(Base):
     reason: Mapped[Optional[str]] = mapped_column(Text)
 
     group: Mapped[SimilarGroup] = relationship(back_populates="items")
+
+
+class UserDecision(Base):
+    __tablename__ = "user_decisions"
+    __table_args__ = (
+        UniqueConstraint("group_kind", "group_id", "file_id", name="uq_user_decisions_group_file"),
+        Index("idx_user_decisions_lookup", "group_kind", "group_id", "decision"),
+        CheckConstraint("group_kind IN ('exact', 'similar')", name="chk_user_decisions_group_kind"),
+        CheckConstraint("decision IN ('keep', 'trash', 'delete', 'ignore')", name="chk_user_decisions_decision"),
+    )
+
+    id: Mapped[int] = mapped_column(Integer, primary_key=True, autoincrement=True)
+    group_kind: Mapped[str] = mapped_column(String, nullable=False)
+    group_id: Mapped[int] = mapped_column(Integer, nullable=False)
+    file_id: Mapped[int] = mapped_column(ForeignKey("files.id", ondelete="CASCADE"), nullable=False)
+    decision: Mapped[str] = mapped_column(String, nullable=False)
+    note: Mapped[Optional[str]] = mapped_column(Text)
+    created_at: Mapped[str] = mapped_column(Text, nullable=False, server_default=text("(datetime('now'))"))
 
 
 class ActionBatch(Base):
