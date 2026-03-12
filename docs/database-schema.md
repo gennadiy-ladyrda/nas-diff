@@ -59,3 +59,9 @@
 4. Пользователь фиксирует `user_decisions`.
 5. Создается и исполняется `action_batch`.
 6. Для move/restore пишутся записи `file_movements`.
+
+## 6. Размещение SQLite файла
+- В Docker: `DATABASE_URL=sqlite:////data/nas_diff.db`.
+- На хосте `/data` маппится в `HOST_DATA_DIR` (по умолчанию `~/.nas-diff/data`).
+- Файлы БД не хранятся в git-репозитории (`data/` исключен через `.gitignore`).
+- Для локального запуска рекомендуется `.env.local` и команды из `justfile`.

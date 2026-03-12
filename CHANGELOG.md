@@ -6,6 +6,85 @@
 
 ## [Unreleased]
 
+## [2026-03-13] DOCS-ARCH-01 - Синхронизация архитектурных документов по операционным решениям
+
+### Changed
+- `docs/architecture.md`: добавлены и уточнены операционные соглашения по хранению SQLite в `~/.nas-diff/data` (`HOST_DATA_DIR`) и локальному запуску через `.env.local` + `justfile`.
+- `docs/specification.md`: уточнен конфигурационный раздел (`HOST_DATA_DIR`, `APP_DATA_DIR`, `DB_ALLOW_DESTRUCTIVE_MIGRATIONS`) и добавлены правила локального запуска через `justfile`.
+- `docs/database-schema.md`: зафиксировано размещение SQLite на хосте через `HOST_DATA_DIR` и исключение `data/` из git.
+- `docs/blueprint-v1.md`: закреплены операционные решения по каталогу данных в home пользователя и локальному профилю запуска.
+- Из архитектурных документов убрано дублирование статуса выполнения, оставлены только актуальные архитектурные/операционные договоренности.
+
+### Validation
+- Проверка документов на консистентность терминов и параметров:
+  - `HOST_DATA_DIR`, `APP_DATA_DIR`, `.env.local`, `justfile`.
+
+## [2026-03-13] OPS-LOCAL-02 - Хранение данных в home-каталоге пользователя
+
+### Added
+- Поддержка host-каталога данных `HOST_DATA_DIR` для docker-compose (рекомендуемый путь: `~/.nas-diff/data`).
+- Автосоздание каталога `HOST_DATA_DIR` в `just init-local` перед `up/config`.
+
+### Changed
+- `docker-compose.yml`: bind mount `./data:/data` заменен на `${HOST_DATA_DIR:-${HOME}/.nas-diff/data}:/data`.
+- `backend/app/config.py`: дефолтный путь БД вне Docker перенесен в home пользователя (`~/.nas-diff/data/nas_diff.db`).
+- `.env.example` и `.env.local`: добавлен/заполнен `HOST_DATA_DIR`.
+- `.gitignore`: добавлен `data/`; `data/nas_diff.db` удален из индекса git.
+
+### Validation
+- `just --list`.
+- `just config` (резолв bind mount в `/Users/gena/.nas-diff/data`).
+- `just up`.
+- `just health` (`status=ok`, `database=ok`, `redis=ok`).
+- Проверка на хосте: создан каталог `/Users/gena/.nas-diff/data` и файл `nas_diff.db`.
+
+## [2026-03-13] OPS-LOCAL-01 - Локальный профиль запуска через just
+
+### Added
+- `justfile` с командами локального управления compose:
+  - `up`, `down`, `ps`, `logs`, `health`, `config`, `restart`.
+- Автоподготовка mock-директорий NAS в `just init-local`.
+
+### Changed
+- `.gitignore`: добавлен `.env.local`.
+
+### Validation
+- `just --list` -> рецепты обнаружены корректно.
+- `just config` -> compose-конфиг успешно рендерится с `.env.local`.
+
+## [2026-03-13] DB-01 - Модель данных, миграции и репозитории
+
+### Added
+- DB-layer на `SQLAlchemy`:
+  - `backend/app/db/session.py` (engine/session factory, `PRAGMA foreign_keys=ON`);
+  - `backend/app/db/models.py` (ORM-модели ключевых таблиц);
+  - `backend/app/db/repositories/`:
+    - `scan_jobs.py`,
+    - `files.py`,
+    - `groups.py`,
+    - `actions.py`.
+- Migration runner:
+  - `backend/app/db/migrations/__init__.py`;
+  - `backend/app/db/migrations/sql/0001_init.sql` (init-схема, синхронизирована с `database/schema.sql`);
+  - таблица `schema_migrations` с checksum-контролем.
+- Тесты DB-слоя:
+  - `backend/tests/db/test_migrations.py`;
+  - `backend/tests/db/test_repositories.py`;
+  - `backend/tests/db/helpers.py`;
+  - `backend/pytest.ini`.
+
+### Changed
+- `backend/app/main.py` и `backend/app/worker.py`: авто-применение миграций на startup.
+- `backend/app/config.py`, `.env.example`, `docker-compose.yml`: добавлен флаг `DB_ALLOW_DESTRUCTIVE_MIGRATIONS` (по умолчанию `false`).
+- `backend/requirements.txt`: добавлен `sqlalchemy==2.0.37`.
+- `backend/app/db/__init__.py`: экспорт DB API (models/session/migrations).
+
+### Validation
+- `PYTHONPYCACHEPREFIX=/tmp/python-pycache python3 -m compileall backend/app backend/tests`.
+- `sqlite3 :memory: ".read database/schema.sql"`.
+- `docker compose config`.
+- `PYTHONPATH=. /tmp/nas-diff-venv/bin/python -m pytest -q` в `backend/` -> `7 passed`.
+
 ## [2026-03-13] INFRA-01 - Базовый каркас backend/worker и контейнеров
 
 ### Added

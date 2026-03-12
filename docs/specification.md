@@ -74,14 +74,21 @@
 Обязательные параметры окружения:
 - `NAS_SCAN_ROOTS`
 - `NAS_TRASH_DIR`
-- `DATABASE_URL`
 - `REDIS_URL`
 
 Опциональные:
+- `HOST_DATA_DIR` (default: `${HOME}/.nas-diff/data`, используется docker-compose для bind mount в `/data`)
+- `DATABASE_URL` (default: `sqlite:////data/nas_diff.db` в контейнере, либо автогенерация из `APP_DATA_DIR` вне Docker)
+- `APP_DATA_DIR` (default: `~/.nas-diff/data`, используется приложением для локального sqlite path вне Docker)
 - `PHASH_DISTANCE_THRESHOLD` (default: 8)
 - `MAX_SCAN_WORKERS` (default: 2)
 - `DEFAULT_FILE_ACTION` (default: move_to_trash)
 - `HARD_DELETE_ENABLED` (default: false)
+- `DB_ALLOW_DESTRUCTIVE_MIGRATIONS` (default: false)
+
+Локальный запуск:
+- Рекомендуется профиль `.env.local` и команды из `justfile`.
+- Перед стартом локальные каталоги подготавливаются через `just init-local`.
 
 ## 7. API v1 (черновой контракт)
 ### Health
