@@ -12,6 +12,10 @@ from app.config import Settings, get_settings
 router = APIRouter()
 
 
+def _check_api() -> dict[str, str]:
+    return {"status": "ok", "detail": "API reachable"}
+
+
 def _check_sqlite(database_url: str) -> dict[str, str]:
     sqlite_prefix = "sqlite:///"
     if not database_url.startswith(sqlite_prefix):
@@ -37,11 +41,12 @@ def _check_redis(redis_url: str) -> dict[str, str]:
 
 @router.get("/health")
 def health(settings: Settings = Depends(get_settings)) -> dict[str, Any]:
+    api = _check_api()
     database = _check_sqlite(settings.database_url)
     redis = _check_redis(settings.redis_url)
 
     overall_status = "ok"
-    if database["status"] == "error" or redis["status"] == "error":
+    if any(component["status"] != "ok" for component in (api, database, redis)):
         overall_status = "degraded"
 
     return {
@@ -49,6 +54,7 @@ def health(settings: Settings = Depends(get_settings)) -> dict[str, Any]:
         "version": settings.app_version,
         "status": overall_status,
         "components": {
+            "api": api,
             "database": database,
             "redis": redis,
         },

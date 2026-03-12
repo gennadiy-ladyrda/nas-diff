@@ -5,14 +5,14 @@
 ## 1. Общий статус проекта
 - Текущая стадия: базовая инфраструктура backend/worker поднята.
 - Продуктовый режим безопасности: `move_to_trash` по умолчанию, `HARD_DELETE_ENABLED=false`.
-- Ближайший фокус: реализация `API-01` поверх готового DB-layer.
+- Ближайший фокус: реализация `API-02` (оркестрация scan jobs и статусы).
 
 ## 2. Прогресс по backlog
 | Task | Статус | Комментарий |
 |---|---|---|
 | INFRA-01 | done | Выполнен backend scaffold, Docker-окружение, health endpoint и worker startup. |
 | DB-01 | done | Реализованы миграции, ORM-модели и репозитории для ключевых сущностей. |
-| API-01 | todo | Ожидает DB-layer базовых сущностей. |
+| API-01 | done | Реализованы health и CRUD для `scan_roots` с валидацией путей и API-тестами. |
 | API-02 | todo | Ожидает API-01 и worker orchestration логики. |
 | CORE-01 | todo | Не начато. |
 | CORE-02 | todo | Не начато. |
@@ -43,7 +43,7 @@
 - В рабочем каталоге может оставаться legacy-файл `data/nas_diff.db`; актуальный путь хранения БД перенесен в `~/.nas-diff/data`.
 
 ## 6. Следующий практический шаг
-- Выполнить `tasks/API-01.md`: реализовать endpoint'ы scan jobs поверх репозиториев DB-layer.
+- Выполнить `tasks/API-02.md`: реализовать `POST/GET` endpoint'ы scan jobs и интеграцию с worker queue.
 
 ## 7. Детали выполнения DB-01
 - Добавлен DB-layer на `SQLAlchemy 2.x`:
@@ -89,3 +89,24 @@
 - Оставлены только операционные изменения:
   - хранение SQLite в `~/.nas-diff/data` через `HOST_DATA_DIR`;
   - локальный запуск через `.env.local` и `justfile`.
+
+## 12. Детали выполнения API-01
+- Добавлен API для источников сканирования:
+  - `POST /api/v1/scan/roots` (add with canonical path validation);
+  - `GET /api/v1/scan/roots` (list);
+  - `PATCH /api/v1/scan/roots/{root_id}` (enable/disable);
+  - `DELETE /api/v1/scan/roots/{root_id}` (remove).
+- Реализована строгая валидация путей:
+  - только абсолютные пути;
+  - canonical normalization через `posixpath.normpath`;
+  - запрет путей вне mount root `/nas`.
+- Добавлен репозиторий `ScanRootRepository` с обработкой конфликтов:
+  - duplicate path -> `409`;
+  - delete при `scan_job_roots` ссылках -> `409`.
+- `GET /api/v1/health` расширен компонентом `api` и агрегированием статуса по `api/database/redis`.
+- Роутер `scan_roots` подключен в `app/main.py`.
+
+## 13. Проверки по API-01
+- `PYTHONPYCACHEPREFIX=/tmp/python-pycache python3 -m compileall backend/app backend/tests` -> ok.
+- `docker compose config` -> ok.
+- `PYTHONPATH=. /tmp/nas-diff-venv/bin/python -m pytest -q` (backend) -> `10 passed`.

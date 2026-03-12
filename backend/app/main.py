@@ -5,6 +5,7 @@ import logging
 from fastapi import APIRouter, FastAPI
 
 from app.api.routes_health import router as health_router
+from app.api.routes_scan_roots import router as scan_roots_router
 from app.config import get_settings
 from app.db.migrations import apply_migrations_from_settings
 from app.log_setup import configure_logging
@@ -20,6 +21,7 @@ app = FastAPI(
 
 api_v1 = APIRouter(prefix="/api/v1")
 api_v1.include_router(health_router)
+api_v1.include_router(scan_roots_router)
 app.include_router(api_v1)
 
 

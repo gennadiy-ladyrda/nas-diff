@@ -6,6 +6,35 @@
 
 ## [Unreleased]
 
+## [2026-03-13] API-01 - Health и управление источниками сканирования
+
+### Added
+- Новый API-роутер `scan_roots`:
+  - `POST /api/v1/scan/roots`;
+  - `GET /api/v1/scan/roots`;
+  - `PATCH /api/v1/scan/roots/{root_id}`;
+  - `DELETE /api/v1/scan/roots/{root_id}`.
+- Новый DB-репозиторий `ScanRootRepository`:
+  - create/list/update enabled/delete;
+  - доменные ошибки `ScanRootAlreadyExistsError`, `ScanRootInUseError`.
+- API-тесты:
+  - `backend/tests/api/conftest.py`;
+  - `backend/tests/api/test_api_01_scan_roots.py`.
+
+### Changed
+- `GET /api/v1/health` дополнен компонентом `api` и итоговым статусом по всем зависимостям (`api`, `database`, `redis`).
+- Добавлена строгая валидация path для scan roots:
+  - только абсолютные пути;
+  - canonical normalization (`posixpath.normpath`);
+  - запрет путей вне `/nas`.
+- Роутер `scan_roots` подключен в `backend/app/main.py`.
+- `backend/app/db/session.py`: `get_db_session` приведен к dependency-friendly сигнатуре без входных параметров.
+
+### Validation
+- `PYTHONPYCACHEPREFIX=/tmp/python-pycache python3 -m compileall backend/app backend/tests`.
+- `docker compose config`.
+- `PYTHONPATH=. /tmp/nas-diff-venv/bin/python -m pytest -q` (backend) -> `10 passed`.
+
 ## [2026-03-13] DOCS-ARCH-01 - Синхронизация архитектурных документов по операционным решениям
 
 ### Changed
