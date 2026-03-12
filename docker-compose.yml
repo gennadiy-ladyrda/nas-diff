@@ -1,0 +1,57 @@
+
+x-common-env: &common-env
+  TZ: Europe/Moscow
+  APP_ENV: production
+  LOG_LEVEL: ${LOG_LEVEL:-INFO}
+  DATABASE_URL: ${DATABASE_URL:-sqlite:////data/nas_diff.db}
+  REDIS_URL: ${REDIS_URL:-redis://redis:6379/0}
+  NAS_SCAN_ROOTS: ${NAS_SCAN_ROOTS:-/nas/photo,/nas/archive}
+  NAS_TRASH_DIR: ${NAS_TRASH_DIR:-/nas/.nas-diff-trash}
+  DEFAULT_FILE_ACTION: ${DEFAULT_FILE_ACTION:-move_to_trash}
+  HARD_DELETE_ENABLED: ${HARD_DELETE_ENABLED:-false}
+  MAX_SCAN_WORKERS: ${MAX_SCAN_WORKERS:-2}
+  PHASH_DISTANCE_THRESHOLD: ${PHASH_DISTANCE_THRESHOLD:-8}
+  DB_ALLOW_DESTRUCTIVE_MIGRATIONS: ${DB_ALLOW_DESTRUCTIVE_MIGRATIONS:-false}
+
+services:
+  api:
+    build:
+      context: ./backend
+      dockerfile: Dockerfile
+    image: nas-diff-api:0.1.0
+    container_name: nas-diff-api
+    restart: unless-stopped
+    command: ["uvicorn", "app.main:app", "--host", "0.0.0.0", "--port", "8080"]
+    environment: *common-env
+    depends_on:
+      - redis
+    ports:
+      - "18080:8080"
+    volumes:
+      - ./config:/config:ro
+      - ${HOST_DATA_DIR:-${HOME}/.nas-diff/data}:/data
+      - ${NAS_MOUNT_PATH:-/volume1}:/nas
+
+  worker:
+    image: nas-diff-api:0.1.0
+    container_name: nas-diff-worker
+    restart: unless-stopped
+    command: ["python", "-m", "app.worker"]
+    environment: *common-env
+    depends_on:
+      - redis
+    volumes:
+      - ./config:/config:ro
+      - ${HOST_DATA_DIR:-${HOME}/.nas-diff/data}:/data
+      - ${NAS_MOUNT_PATH:-/volume1}:/nas
+
+  redis:
+    image: redis:7-alpine
+    container_name: nas-diff-redis
+    restart: unless-stopped
+    command: ["redis-server", "--appendonly", "yes"]
+    volumes:
+      - redis_data:/data
+
+volumes:
+  redis_data:
