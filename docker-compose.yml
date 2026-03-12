@@ -33,9 +33,6 @@ services:
       - ${NAS_MOUNT_PATH:-/volume1}:/nas
 
   worker:
-    build:
-      context: ./backend
-      dockerfile: Dockerfile
     image: nas-diff-api:0.1.0
     container_name: nas-diff-worker
     restart: unless-stopped

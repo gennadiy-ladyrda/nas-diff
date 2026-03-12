@@ -32,6 +32,8 @@
 - `docs/architecture.md`
 - `docs/specification.md`
 - `docs/blueprint-v1.md`
+- `STATUS.md`
+- `CHANGELOG.md`
 
 ## 4. Архитектурные принципы
 1. Safety-first:
