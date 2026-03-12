@@ -5,7 +5,7 @@
 ## 1. Общий статус проекта
 - Текущая стадия: базовая инфраструктура backend/worker поднята.
 - Продуктовый режим безопасности: `move_to_trash` по умолчанию, `HARD_DELETE_ENABLED=false`.
-- Ближайший фокус: реализация `ACT-01` (безопасные batch-действия и rollback).
+- Ближайший фокус: `UI-01` (dashboard и запуск scan jobs).
 
 ## 2. Прогресс по backlog
 | Task | Статус | Комментарий |
@@ -18,7 +18,7 @@
 | CORE-02 | done | Реализована exact-дедупликация и метрика `reclaimable_bytes`. |
 | CORE-03 | done | Реализована similar-дедупликация (phash-like, Hamming threshold). |
 | DECISION-01 | done | Реализован auto-primary scoring и API сохранения пользовательских решений. |
-| ACT-01 | todo | Не начато. |
+| ACT-01 | done | Реализованы actions API, action worker executor, rollback через `file_movements` и интеграционные тесты. |
 | UI-01 | todo | Не начато. |
 | UI-02 | todo | Не начато. |
 | QA-01 | todo | Не начато. |
@@ -43,7 +43,7 @@
 - В рабочем каталоге может оставаться legacy-файл `data/nas_diff.db`; актуальный путь хранения БД перенесен в `~/.nas-diff/data`.
 
 ## 6. Следующий практический шаг
-- Выполнить `tasks/ACT-01.md`: реализовать безопасные batch-действия (`move_to_trash/delete/restore`) и rollback.
+- Выполнить `tasks/UI-01.md`: реализовать dashboard и запуск scan jobs из UI.
 
 ## 7. Детали выполнения DB-01
 - Добавлен DB-layer на `SQLAlchemy 2.x`:
@@ -152,3 +152,30 @@
 - `PYTHONPYCACHEPREFIX=/tmp/python-pycache python3 -m compileall backend/app backend/tests` -> ok.
 - `docker compose config` -> ok.
 - `PYTHONPATH=. /tmp/nas-diff-venv/bin/python -m pytest -q` (backend) -> `18 passed`.
+
+## 18. Детали выполнения ACT-01
+- Добавлен API `actions`:
+  - `POST /api/v1/actions/batches` (создание draft batch);
+  - `GET /api/v1/actions/batches/{batch_id}` (статус и пофайловые результаты);
+  - `POST /api/v1/actions/batches/{batch_id}/confirm` (подтверждение и enqueue в `action_queue`);
+  - `POST /api/v1/actions/batches/{batch_id}/rollback` (создание restore-batch из `file_movements`).
+- Добавлен `ActionService`:
+  - валидация переходов `draft -> confirmed -> executed|partially_failed|failed`;
+  - исполнение `move_to_trash`, `delete_permanent`, `restore` с пофайловыми ошибками без silent-fail;
+  - блокировка `delete_permanent` при `HARD_DELETE_ENABLED=false`;
+  - auto-mark исходного `move_to_trash` batch как `rolled_back` после полного восстановления.
+- Добавлен worker executor:
+  - `app.workers.action_worker.process_action_batch`;
+  - очередь `ActionQueueClient` / `RQActionQueueClient` c enqueue в `action_queue`.
+- Расширен DB-layer:
+  - ORM-модель `FileMovement`;
+  - методы репозитория для логирования перемещений и фиксации `restored_at`.
+- Добавлены интеграционные тесты `ACT-01`:
+  - happy path `move_to_trash -> execute -> rollback`;
+  - блок hard delete при выключенном флаге;
+  - failure path с проверкой `action_items.error_message`.
+
+## 19. Проверки по ACT-01
+- `PYTHONPYCACHEPREFIX=/tmp/python-pycache python3 -m compileall backend/app backend/tests` -> ok.
+- `docker compose config` -> ok.
+- `PYTHONPATH=. /tmp/nas-diff-venv/bin/python -m pytest -q` (backend) -> `21 passed`.

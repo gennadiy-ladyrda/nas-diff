@@ -6,6 +6,36 @@
 
 ## [Unreleased]
 
+## [2026-03-13] ACT-01 - Безопасные batch-действия и rollback
+
+### Added
+- API actions:
+  - `POST /api/v1/actions/batches`;
+  - `GET /api/v1/actions/batches/{batch_id}`;
+  - `POST /api/v1/actions/batches/{batch_id}/confirm`;
+  - `POST /api/v1/actions/batches/{batch_id}/rollback`.
+- Worker execution для action batches:
+  - `app.workers.action_worker.process_action_batch`.
+- Action queue integration:
+  - `ActionQueueClient` / `RQActionQueueClient`;
+  - enqueue в `action_queue`.
+- Service layer:
+  - `backend/app/services/action_service.py` (status machine, execution, rollback).
+- Интеграционные API-тесты:
+  - `backend/tests/api/test_act_01_actions.py`.
+
+### Changed
+- `backend/app/main.py`: подключен роутер `actions`.
+- `backend/app/db/models.py`: добавлена ORM-модель `FileMovement`.
+- `backend/app/db/repositories/actions.py`: добавлены операции для `file_movements`, restore-marking и batch summary/status helpers.
+- `backend/app/workers/queue.py`: добавлена поддержка action queue client.
+- `backend/tests/api/conftest.py`: добавлен in-memory action queue override и test-trash каталог в `tmp_path`.
+
+### Validation
+- `PYTHONPYCACHEPREFIX=/tmp/python-pycache python3 -m compileall backend/app backend/tests`.
+- `docker compose config`.
+- `PYTHONPATH=. /tmp/nas-diff-venv/bin/python -m pytest -q` (backend) -> `21 passed`.
+
 ## [2026-03-13] API-02 + CORE-01/02/03 + DECISION-01 - Scan pipeline, dedup и решения пользователя
 
 ### Added
