@@ -19,6 +19,11 @@ class ScanQueueClient:
         raise NotImplementedError
 
 
+class ActionQueueClient:
+    def enqueue_action_batch(self, *, batch_id: str) -> str:  # pragma: no cover - interface method
+        raise NotImplementedError
+
+
 @dataclass
 class RQScanQueueClient(ScanQueueClient):
     redis_url: str
@@ -35,7 +40,29 @@ class RQScanQueueClient(ScanQueueClient):
         return str(rq_job.id)
 
 
+@dataclass
+class RQActionQueueClient(ActionQueueClient):
+    redis_url: str
+    queue_name: str
+
+    def enqueue_action_batch(self, *, batch_id: str) -> str:
+        redis_conn = Redis.from_url(self.redis_url)
+        queue = Queue(self.queue_name, connection=redis_conn)
+        rq_job = queue.enqueue(
+            "app.workers.action_worker.process_action_batch",
+            kwargs={"batch_id": batch_id},
+            job_id=f"action-{batch_id}",
+        )
+        return str(rq_job.id)
+
+
 def get_scan_queue_client(settings: Optional[Settings] = None) -> ScanQueueClient:
     active_settings = settings or get_settings()
     queue_name = active_settings.worker_queues[0] if active_settings.worker_queues else "scan_queue"
     return RQScanQueueClient(redis_url=active_settings.redis_url, queue_name=queue_name)
+
+
+def get_action_queue_client(settings: Optional[Settings] = None) -> ActionQueueClient:
+    active_settings = settings or get_settings()
+    queue_name = active_settings.worker_queues[1] if len(active_settings.worker_queues) > 1 else "action_queue"
+    return RQActionQueueClient(redis_url=active_settings.redis_url, queue_name=queue_name)

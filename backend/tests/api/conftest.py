@@ -7,6 +7,7 @@ from fastapi import APIRouter, FastAPI
 from fastapi.testclient import TestClient
 from sqlalchemy.orm import Session, sessionmaker
 
+from app.api.routes_actions import _get_action_queue, router as actions_router
 from app.api.routes_groups import router as groups_router
 from app.api.routes_health import router as health_router
 from app.api.routes_scan import _get_scan_queue, router as scan_router
@@ -15,12 +16,14 @@ from app.config import Settings, get_settings
 from app.db import get_db_session
 from app.db.migrations import apply_migrations
 from app.db.session import get_session_factory
-from app.workers.queue import ScanQueueClient
+from app.workers.queue import ActionQueueClient, ScanQueueClient
 
 
 @pytest.fixture()
 def test_settings(tmp_path) -> Settings:
     db_file = tmp_path / "nas_diff_api_test.db"
+    trash_dir = tmp_path / ".nas-diff-trash"
+    trash_dir.mkdir(parents=True, exist_ok=True)
     return Settings(
         app_name="nas-diff-test",
         app_version="0.1.0-test",
@@ -30,7 +33,7 @@ def test_settings(tmp_path) -> Settings:
         database_url=f"sqlite:///{db_file}",
         redis_url="redis://127.0.0.1:1/0",
         nas_scan_roots=("/nas/photo", "/nas/archive"),
-        nas_trash_dir="/nas/.nas-diff-trash",
+        nas_trash_dir=str(trash_dir),
         default_file_action="move_to_trash",
         hard_delete_enabled=False,
         max_scan_workers=1,
@@ -51,6 +54,7 @@ def api_client(
     test_settings: Settings,
     api_session_factory: sessionmaker[Session],
     fake_scan_queue: "InMemoryScanQueue",
+    fake_action_queue: "InMemoryActionQueue",
 ) -> Iterator[TestClient]:
     app = FastAPI()
     api_v1 = APIRouter(prefix="/api/v1")
@@ -58,6 +62,7 @@ def api_client(
     api_v1.include_router(scan_roots_router)
     api_v1.include_router(scan_router)
     api_v1.include_router(groups_router)
+    api_v1.include_router(actions_router)
     app.include_router(api_v1)
 
     def _override_settings() -> Settings:
@@ -70,6 +75,7 @@ def api_client(
     app.dependency_overrides[get_settings] = _override_settings
     app.dependency_overrides[get_db_session] = _override_db
     app.dependency_overrides[_get_scan_queue] = lambda: fake_scan_queue
+    app.dependency_overrides[_get_action_queue] = lambda: fake_action_queue
 
     with TestClient(app) as client:
         yield client
@@ -89,3 +95,17 @@ class InMemoryScanQueue(ScanQueueClient):
 @pytest.fixture()
 def fake_scan_queue() -> InMemoryScanQueue:
     return InMemoryScanQueue()
+
+
+class InMemoryActionQueue(ActionQueueClient):
+    def __init__(self) -> None:
+        self.enqueued_batch_ids: list[str] = []
+
+    def enqueue_action_batch(self, *, batch_id: str) -> str:
+        self.enqueued_batch_ids.append(batch_id)
+        return f"mem-{batch_id}"
+
+
+@pytest.fixture()
+def fake_action_queue() -> InMemoryActionQueue:
+    return InMemoryActionQueue()

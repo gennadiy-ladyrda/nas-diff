@@ -3,10 +3,10 @@ from __future__ import annotations
 from dataclasses import dataclass
 from datetime import datetime, timezone
 
-from sqlalchemy import select
+from sqlalchemy import func, select
 from sqlalchemy.orm import Session
 
-from app.db.models import ActionBatch, ActionItem
+from app.db.models import ActionBatch, ActionItem, FileMovement
 
 
 @dataclass(frozen=True)
@@ -66,12 +66,104 @@ class ActionRepository:
 
         return payload
 
+    def get_item(self, item_id: int) -> ActionItem | None:
+        return self.session.get(ActionItem, item_id)
+
     def list_items(self, *, batch_id: str, status: str | None = None) -> list[ActionItem]:
         stmt = select(ActionItem).where(ActionItem.batch_id == batch_id)
         if status is not None:
             stmt = stmt.where(ActionItem.status == status)
         stmt = stmt.order_by(ActionItem.id.asc())
         return list(self.session.scalars(stmt))
+
+    def add_file_movement(
+        self,
+        *,
+        file_id: int,
+        batch_id: str,
+        from_path: str,
+        to_path: str,
+    ) -> FileMovement:
+        movement = FileMovement(
+            file_id=file_id,
+            batch_id=batch_id,
+            from_path=from_path,
+            to_path=to_path,
+        )
+        self.session.add(movement)
+        self.session.commit()
+        self.session.refresh(movement)
+        return movement
+
+    def list_file_movements(self, *, batch_id: str, unrestored_only: bool = False) -> list[FileMovement]:
+        stmt = select(FileMovement).where(FileMovement.batch_id == batch_id)
+        if unrestored_only:
+            stmt = stmt.where(FileMovement.restored_at.is_(None))
+        stmt = stmt.order_by(FileMovement.id.asc())
+        return list(self.session.scalars(stmt))
+
+    def get_latest_unrestored_movement(
+        self,
+        *,
+        file_id: int,
+        batch_id: str | None = None,
+    ) -> FileMovement | None:
+        stmt = select(FileMovement).where(
+            FileMovement.file_id == file_id,
+            FileMovement.restored_at.is_(None),
+        )
+        if batch_id is not None:
+            stmt = stmt.where(FileMovement.batch_id == batch_id)
+
+        stmt = stmt.order_by(FileMovement.id.desc()).limit(1)
+        return self.session.scalar(stmt)
+
+    def mark_file_movement_restored(
+        self,
+        *,
+        file_id: int,
+        from_path: str,
+        to_path: str,
+    ) -> FileMovement | None:
+        movement = self.find_unrestored_movement(
+            file_id=file_id,
+            from_path=from_path,
+            to_path=to_path,
+        )
+        if movement is None:
+            return None
+
+        movement.restored_at = _utc_iso_now()
+        self.session.commit()
+        self.session.refresh(movement)
+        return movement
+
+    def find_unrestored_movement(
+        self,
+        *,
+        file_id: int,
+        from_path: str,
+        to_path: str,
+    ) -> FileMovement | None:
+        stmt = (
+            select(FileMovement)
+            .where(
+                FileMovement.file_id == file_id,
+                FileMovement.from_path == from_path,
+                FileMovement.to_path == to_path,
+                FileMovement.restored_at.is_(None),
+            )
+            .order_by(FileMovement.id.desc())
+            .limit(1)
+        )
+        return self.session.scalar(stmt)
+
+    def count_unrestored_movements(self, *, batch_id: str) -> int:
+        stmt = select(func.count(FileMovement.id)).where(
+            FileMovement.batch_id == batch_id,
+            FileMovement.restored_at.is_(None),
+        )
+        return int(self.session.scalar(stmt) or 0)
 
     def update_batch_status(self, batch_id: str, *, status: str) -> ActionBatch:
         batch = self._require_batch(batch_id)
@@ -82,6 +174,13 @@ class ActionRepository:
         if status in {"executed", "partially_failed", "failed", "rolled_back"}:
             batch.executed_at = _utc_iso_now()
 
+        self.session.commit()
+        self.session.refresh(batch)
+        return batch
+
+    def update_batch_summary(self, batch_id: str, *, summary: str | None) -> ActionBatch:
+        batch = self._require_batch(batch_id)
+        batch.summary = summary
         self.session.commit()
         self.session.refresh(batch)
         return batch

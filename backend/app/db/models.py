@@ -248,3 +248,18 @@ class ActionItem(Base):
     executed_at: Mapped[Optional[str]] = mapped_column(Text)
 
     batch: Mapped[ActionBatch] = relationship(back_populates="items")
+
+
+class FileMovement(Base):
+    __tablename__ = "file_movements"
+    __table_args__ = (
+        Index("idx_file_movements_file_id", "file_id"),
+    )
+
+    id: Mapped[int] = mapped_column(Integer, primary_key=True, autoincrement=True)
+    file_id: Mapped[int] = mapped_column(ForeignKey("files.id", ondelete="RESTRICT"), nullable=False)
+    batch_id: Mapped[str] = mapped_column(ForeignKey("action_batches.id", ondelete="CASCADE"), nullable=False)
+    from_path: Mapped[str] = mapped_column(Text, nullable=False)
+    to_path: Mapped[str] = mapped_column(Text, nullable=False)
+    moved_at: Mapped[str] = mapped_column(Text, nullable=False, server_default=text("(datetime('now'))"))
+    restored_at: Mapped[Optional[str]] = mapped_column(Text)

@@ -4,6 +4,7 @@ import logging
 
 from fastapi import APIRouter, FastAPI
 
+from app.api.routes_actions import router as actions_router
 from app.api.routes_groups import router as groups_router
 from app.api.routes_health import router as health_router
 from app.api.routes_scan import router as scan_router
@@ -26,6 +27,7 @@ api_v1.include_router(health_router)
 api_v1.include_router(scan_roots_router)
 api_v1.include_router(scan_router)
 api_v1.include_router(groups_router)
+api_v1.include_router(actions_router)
 app.include_router(api_v1)
 
 
