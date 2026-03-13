@@ -3,9 +3,9 @@
 Актуально на: `2026-03-13`
 
 ## 1. Общий статус проекта
-- Текущая стадия: базовая инфраструктура backend/worker поднята.
+- Текущая стадия: v1 baseline закрыт по backend, UI, QA и ops-документации.
 - Продуктовый режим безопасности: `move_to_trash` по умолчанию, `HARD_DELETE_ENABLED=false`.
-- Ближайший фокус: `UI-01` (dashboard и запуск scan jobs).
+- Ближайший фокус: проверить на реальном большом каталоге scan после hotfix (`job timeout + rollback`), затем запустить полный UI regression (`vitest + playwright`) в окружении с Node.js/npm.
 
 ## 2. Прогресс по backlog
 | Task | Статус | Комментарий |
@@ -19,10 +19,10 @@
 | CORE-03 | done | Реализована similar-дедупликация (phash-like, Hamming threshold). |
 | DECISION-01 | done | Реализован auto-primary scoring и API сохранения пользовательских решений. |
 | ACT-01 | done | Реализованы actions API, action worker executor, rollback через `file_movements` и интеграционные тесты. |
-| UI-01 | todo | Не начато. |
-| UI-02 | todo | Не начато. |
-| QA-01 | todo | Не начато. |
-| OPS-01 | todo | Не начато. |
+| UI-01 | done | Добавлен frontend dashboard + scan setup с polling статусов, health и обработкой ошибок API. |
+| UI-02 | done | Добавлен frontend review groups + action center (decision override, draft/confirm, rollback). |
+| QA-01 | done | Добавлены frontend component/e2e smoke tests, backend regression test и единый regression script. |
+| OPS-01 | done | Добавлен DSM6 runbook: install/update/backup/restore/troubleshooting и safety правила. |
 
 ## 3. Детали выполнения INFRA-01
 - Добавлен единый образ backend (`Python 3.11`, `FastAPI`, `RQ`, `Redis client`) для сервисов `api` и `worker`.
@@ -43,7 +43,7 @@
 - В рабочем каталоге может оставаться legacy-файл `data/nas_diff.db`; актуальный путь хранения БД перенесен в `~/.nas-diff/data`.
 
 ## 6. Следующий практический шаг
-- Выполнить `tasks/UI-01.md`: реализовать dashboard и запуск scan jobs из UI.
+- Выполнить `bash scripts/ci/run_s3_regression_suite.sh` в окружении с установленным `node`/`npm` и browser runtime для Playwright.
 
 ## 7. Детали выполнения DB-01
 - Добавлен DB-layer на `SQLAlchemy 2.x`:
@@ -179,3 +179,58 @@
 - `PYTHONPYCACHEPREFIX=/tmp/python-pycache python3 -m compileall backend/app backend/tests` -> ok.
 - `docker compose config` -> ok.
 - `PYTHONPATH=. /tmp/nas-diff-venv/bin/python -m pytest -q` (backend) -> `21 passed`.
+
+## 20. Детали выполнения UI-01 / UI-02
+- Добавлен новый frontend-модуль (`React + Vite`) в `frontend/`:
+  - `src/pages/DashboardPage.jsx`: health, scan roots, запуск scan jobs, polling статуса и метрик.
+  - `src/pages/ReviewPage.jsx`: список exact/similar групп, просмотр деталей группы, сохранение decisions.
+  - Action Center в UI: создание draft batch, confirm batch, мониторинг item-статусов, rollback.
+- Добавлен API-клиент `frontend/src/api/client.js` с контрактами для `health/scan/groups/actions`.
+- Добавлены UI-компоненты (`Panel`, `StatusBadge`, `ErrorBanner`) и единый стиль `src/styles/global.css`.
+- Реализовано хранение последних `job_id` в `localStorage` и навигация `Dashboard <-> Review`.
+- Интеграция в инфраструктуру:
+  - добавлен сервис `frontend` в `docker-compose.yml`;
+  - добавлен `frontend/Dockerfile` и `frontend/nginx.conf` (SPA + proxy `/api` -> `api:8080`);
+  - обновлены `.env.example` и `.env.local` (`FRONTEND_PORT`).
+
+## 21. Детали выполнения QA-01
+- Добавлены frontend component tests:
+  - `frontend/tests/component/dashboard-page.test.jsx`;
+  - `frontend/tests/component/review-page.test.jsx`.
+- Добавлены frontend e2e smoke tests (mock API, Playwright):
+  - `frontend/tests/e2e/scan-launch.spec.js`;
+  - `frontend/tests/e2e/review-actions.spec.js`.
+- Добавлен backend regression-тест полного workflow:
+  - `backend/tests/api/test_qa_01_regression.py`.
+- Добавлен единый regression runner:
+  - `scripts/ci/run_s3_regression_suite.sh`.
+
+## 22. Детали выполнения OPS-01
+- Добавлен эксплуатационный runbook `docs/ops/dsm6-runbook.md`:
+  - install/start/stop/update;
+  - backup/restore для SQLite и Redis AOF;
+  - troubleshooting по `database is locked`, `redis down`, `permission denied`;
+  - safety policy по `move_to_trash` и `delete_permanent`.
+
+## 23. Проверки по UI-01 / UI-02 / QA-01 / OPS-01
+- `PYTHONPYCACHEPREFIX=/tmp/python-pycache python3 -m compileall backend/app backend/tests` -> ok.
+- `PYTHONPATH=. /tmp/nas-diff-venv/bin/python -m pytest -q backend/tests` -> `24 passed`.
+- `docker compose config` -> ok (включая новый сервис `frontend`).
+- Ограничение текущего sandbox: `npm` отсутствует (`npm: command not found`), поэтому `vitest/playwright` в этом окружении не запускались.
+
+## 24. Hotfix scan timeout + failed status persistence
+- В конфигурацию добавлен параметр `SCAN_JOB_TIMEOUT_SECONDS` (default `7200`):
+  - `backend/app/config.py`;
+  - `.env.example`, `.env.local`;
+  - `docker-compose.yml`.
+- Для scan queue задан явный RQ timeout из конфига:
+  - `backend/app/workers/queue.py` (`job_timeout` при enqueue scan job).
+- Исправлена обработка падения scan job в оркестраторе:
+  - `backend/app/services/scan_orchestrator.py` теперь делает `session.rollback()` перед `update_status(..., failed, ...)`.
+  - Это устраняет зависание job в `running` после transaction errors / timeout.
+- Снижена нагрузка на SQLite во время сканирования:
+  - `backend/app/core/scanner.py` переведен на batched commits (`_COMMIT_BATCH_SIZE=250`).
+  - `backend/app/db/repositories/files.py` и `file_hashes.py` поддерживают `autocommit=False` для batched режима.
+- Добавлены регрессионные тесты:
+  - `backend/tests/core/test_scan_orchestrator_failures.py` (проверка failed-status после flush error);
+  - `backend/tests/api/test_worker_queue_config.py` (проверка применения timeout в queue client).

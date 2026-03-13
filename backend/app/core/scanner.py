@@ -15,6 +15,8 @@ from app.core.hasher_similar import compute_dhash64_hex, compute_phash64_hex
 from app.db.models import File, ScanRoot
 from app.db.repositories import FileHashRepository, FileRepository
 
+_COMMIT_BATCH_SIZE = 250
+
 
 @dataclass(frozen=True)
 class ScanIndexingResult:
@@ -33,6 +35,7 @@ def scan_and_index(
 
     files_seen = 0
     files_indexed = 0
+    pending_writes = 0
     seen_paths_by_root: dict[int, set[str]] = {}
 
     for root in roots:
@@ -66,7 +69,9 @@ def scan_and_index(
                 first_seen_job_id=job_id if existing is None else None,
                 last_seen_job_id=job_id,
                 is_present=1,
+                autocommit=False,
             )
+            pending_writes += 1
 
             if changed:
                 files_indexed += 1
@@ -74,17 +79,28 @@ def scan_and_index(
                     file_id=file_obj.id,
                     hash_type="blake3_full",
                     hash_hex=compute_blake3_full_hex(file_path),
+                    autocommit=False,
                 )
                 hash_repo.upsert(
                     file_id=file_obj.id,
                     hash_type="dhash64",
                     hash_hex=compute_dhash64_hex(file_path),
+                    autocommit=False,
                 )
                 hash_repo.upsert(
                     file_id=file_obj.id,
                     hash_type="phash64",
                     hash_hex=compute_phash64_hex(file_path),
+                    autocommit=False,
                 )
+                pending_writes += 3
+
+            if pending_writes >= _COMMIT_BATCH_SIZE:
+                session.commit()
+                pending_writes = 0
+
+    if pending_writes > 0:
+        session.commit()
 
     _mark_missing_files(
         session,

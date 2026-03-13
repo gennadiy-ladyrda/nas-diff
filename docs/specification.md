@@ -82,6 +82,7 @@
 - `APP_DATA_DIR` (default: `~/.nas-diff/data`, используется приложением для локального sqlite path вне Docker)
 - `PHASH_DISTANCE_THRESHOLD` (default: 8)
 - `MAX_SCAN_WORKERS` (default: 2)
+- `SCAN_JOB_TIMEOUT_SECONDS` (default: 7200, timeout одного scan job в RQ)
 - `DEFAULT_FILE_ACTION` (default: move_to_trash)
 - `HARD_DELETE_ENABLED` (default: false)
 - `DB_ALLOW_DESTRUCTIVE_MIGRATIONS` (default: false)

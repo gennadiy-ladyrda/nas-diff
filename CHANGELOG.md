@@ -6,6 +6,62 @@
 
 ## [Unreleased]
 
+## [2026-03-13] HOTFIX-SCAN-01 - Таймаут scan jobs, rollback после DB ошибок и batched commits
+
+### Added
+- Новая конфигурация таймаута scan jobs:
+  - `SCAN_JOB_TIMEOUT_SECONDS` (default `7200`) в `backend/app/config.py`.
+- Новые регрессионные тесты:
+  - `backend/tests/core/test_scan_orchestrator_failures.py`;
+  - `backend/tests/api/test_worker_queue_config.py`.
+
+### Changed
+- `backend/app/workers/queue.py`:
+  - scan jobs теперь enqueue с явным `job_timeout` из конфигурации.
+- `backend/app/services/scan_orchestrator.py`:
+  - перед `update_status(...failed...)` добавлен `session.rollback()`;
+  - устранено зависание job в `running` после transaction errors.
+- `backend/app/core/scanner.py`:
+  - сканирование переведено на batched commits (`_COMMIT_BATCH_SIZE=250`) для снижения нагрузки на SQLite.
+- `backend/app/db/repositories/files.py` и `file_hashes.py`:
+  - добавлен режим `autocommit=False` для batched операций сканера.
+- Конфигурация окружения:
+  - `.env.example`, `.env.local`, `docker-compose.yml` дополнены `SCAN_JOB_TIMEOUT_SECONDS`.
+
+### Validation
+- `PYTHONPYCACHEPREFIX=/tmp/python-pycache python3 -m compileall backend/app backend/tests`.
+- `PYTHONPATH=. /tmp/nas-diff-venv/bin/python -m pytest -q backend/tests` -> `24 passed`.
+- `docker compose config`.
+
+## [2026-03-13] UI-01 + UI-02 + QA-01 + OPS-01 - Frontend, regression suite и DSM6 runbook
+
+### Added
+- Новый frontend модуль (`React + Vite`) в `frontend/`:
+  - страницы `Dashboard` и `Review & Actions`;
+  - API client для `health/scan/groups/actions`;
+  - UI-компоненты `Panel`, `StatusBadge`, `ErrorBanner`;
+  - единая стилизация и адаптивный layout.
+- Frontend testing:
+  - component tests (`vitest`) для dashboard/review;
+  - e2e smoke tests (`playwright`) для scan launch и action workflow.
+- Backend regression тест полного цикла:
+  - `backend/tests/api/test_qa_01_regression.py`.
+- Единый regression runner:
+  - `scripts/ci/run_s3_regression_suite.sh`.
+- OPS runbook:
+  - `docs/ops/dsm6-runbook.md` (install/start/stop/update/backup/restore/troubleshooting).
+
+### Changed
+- `docker-compose.yml`: добавлен сервис `frontend` (`nas-diff-frontend:0.1.0`, порт `15173` по умолчанию).
+- `.env.example` и `.env.local`: добавлена переменная `FRONTEND_PORT`.
+- `.gitignore`: добавлены frontend artifacts (`node_modules`, `dist`, playwright reports/results).
+
+### Validation
+- `PYTHONPYCACHEPREFIX=/tmp/python-pycache python3 -m compileall backend/app backend/tests`.
+- `PYTHONPATH=. /tmp/nas-diff-venv/bin/python -m pytest -q backend/tests` -> `24 passed`.
+- `docker compose config`.
+- Ограничение текущего sandbox: `npm` отсутствует (`npm: command not found`), поэтому `vitest/playwright` не запускались в этом окружении.
+
 ## [2026-03-13] ACT-01 - Безопасные batch-действия и rollback
 
 ### Added
