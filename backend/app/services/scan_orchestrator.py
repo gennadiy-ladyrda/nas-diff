@@ -80,12 +80,20 @@ class ScanOrchestrator:
             )
             self.jobs.update_status(job_id, status="completed", set_finished_at=True, error_message=None)
         except Exception as exc:
-            self.jobs.update_status(
-                job_id,
-                status="failed",
-                error_message=str(exc),
-                set_finished_at=True,
-            )
+            # If an error happened during flush/commit, the current transaction must be rolled back
+            # before we can persist failed status for the scan job.
+            self.session.rollback()
+            try:
+                self.jobs.update_status(
+                    job_id,
+                    status="failed",
+                    error_message=str(exc),
+                    set_finished_at=True,
+                )
+            except Exception as status_exc:
+                raise RuntimeError(
+                    f"failed to persist failed status for scan_job={job_id}: {status_exc}"
+                ) from status_exc
             raise
 
 

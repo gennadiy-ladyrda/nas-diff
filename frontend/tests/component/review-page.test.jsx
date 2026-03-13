@@ -1,0 +1,129 @@
+import { afterEach, describe, expect, it, vi } from "vitest";
+import { render, screen, waitFor } from "@testing-library/react";
+import userEvent from "@testing-library/user-event";
+
+import { ReviewPage } from "../../src/pages/ReviewPage";
+
+function jsonResponse(data, status = 200) {
+  return new Response(JSON.stringify(data), {
+    status,
+    headers: { "Content-Type": "application/json" },
+  });
+}
+
+afterEach(() => {
+  vi.unstubAllGlobals();
+});
+
+describe("ReviewPage", () => {
+  it("saves decision and runs action batch workflow", async () => {
+    const groupDetailsBase = {
+      group_kind: "exact",
+      group_id: 101,
+      items: [
+        {
+          file_id: 1,
+          abs_path: "/nas/photo/a.jpg",
+          size_bytes: 100,
+          is_primary: true,
+          decision: null,
+        },
+        {
+          file_id: 2,
+          abs_path: "/nas/photo/b.jpg",
+          size_bytes: 100,
+          is_primary: false,
+          decision: null,
+        },
+      ],
+    };
+
+    let latestGroupDetails = structuredClone(groupDetailsBase);
+    let latestBatch = {
+      batch_id: "batch-1",
+      status: "draft",
+      action_type: "move_to_trash",
+      stats: { total: 1, pending: 1, done: 0, failed: 0, skipped: 0 },
+      items: [
+        {
+          id: 11,
+          file_id: 2,
+          source_path: "/nas/photo/b.jpg",
+          target_path: "/nas/.nas-diff-trash/nas/photo/b.jpg",
+          status: "pending",
+          error_message: null,
+        },
+      ],
+    };
+
+    const fetchMock = vi.fn(async (input, options = {}) => {
+      const url = String(input);
+      const method = (options.method || "GET").toUpperCase();
+
+      if (url.includes("/api/v1/scan/jobs/job-1/groups") && method === "GET") {
+        return jsonResponse({
+          job_id: "job-1",
+          kind: "exact",
+          page: 1,
+          page_size: 100,
+          total: 1,
+          items: [{ id: 101, file_count: 2, reclaimable_bytes: 100 }],
+        });
+      }
+
+      if (url.endsWith("/api/v1/groups/exact/101") && method === "GET") {
+        return jsonResponse(latestGroupDetails);
+      }
+
+      if (url.endsWith("/api/v1/groups/exact/101/decision") && method === "POST") {
+        latestGroupDetails.items[0].is_primary = false;
+        latestGroupDetails.items[1].is_primary = true;
+        latestGroupDetails.items[1].decision = "keep";
+        return jsonResponse({ group_kind: "exact", group_id: 101, file_id: 2, decision: "keep", note: null });
+      }
+
+      if (url.endsWith("/api/v1/actions/batches") && method === "POST") {
+        return jsonResponse(latestBatch, 201);
+      }
+
+      if (url.endsWith("/api/v1/actions/batches/batch-1/confirm") && method === "POST") {
+        latestBatch = {
+          ...latestBatch,
+          status: "executed",
+          stats: { total: 1, pending: 0, done: 1, failed: 0, skipped: 0 },
+          items: latestBatch.items.map((item) => ({ ...item, status: "done" })),
+        };
+        return jsonResponse({ batch_id: "batch-1", status: "confirmed", queued: true });
+      }
+
+      if (url.endsWith("/api/v1/actions/batches/batch-1") && method === "GET") {
+        return jsonResponse(latestBatch);
+      }
+
+      return jsonResponse({ detail: `Unhandled mock: ${method} ${url}` }, 404);
+    });
+
+    vi.stubGlobal("fetch", fetchMock);
+
+    render(<ReviewPage activeJobId="job-1" recentJobIds={["job-1"]} onSelectJob={vi.fn()} />);
+
+    await screen.findByTestId("group-list");
+    await screen.findByTestId("group-details-table");
+
+    await userEvent.click(screen.getAllByRole("button", { name: "keep" })[1]);
+
+    await waitFor(() => {
+      expect(screen.getByTestId("group-details-table")).toHaveTextContent("keep");
+    });
+
+    await userEvent.click(screen.getByRole("button", { name: "Create Draft Batch (1)" }));
+    await screen.findByTestId("batch-card");
+
+    await userEvent.click(screen.getByRole("button", { name: "Confirm Batch" }));
+
+    await waitFor(() => {
+      expect(screen.getByTestId("batch-card")).toHaveTextContent("executed");
+      expect(screen.getByTestId("batch-card")).toHaveTextContent("done");
+    });
+  });
+});

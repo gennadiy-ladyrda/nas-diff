@@ -28,6 +28,7 @@ class ActionQueueClient:
 class RQScanQueueClient(ScanQueueClient):
     redis_url: str
     queue_name: str
+    job_timeout_seconds: int
 
     def enqueue_scan_job(self, *, job_id: str) -> str:
         redis_conn = Redis.from_url(self.redis_url)
@@ -36,6 +37,7 @@ class RQScanQueueClient(ScanQueueClient):
             "app.workers.scan_worker.process_scan_job",
             kwargs={"job_id": job_id},
             job_id=f"scan-{job_id}",
+            job_timeout=self.job_timeout_seconds,
         )
         return str(rq_job.id)
 
@@ -59,7 +61,11 @@ class RQActionQueueClient(ActionQueueClient):
 def get_scan_queue_client(settings: Optional[Settings] = None) -> ScanQueueClient:
     active_settings = settings or get_settings()
     queue_name = active_settings.worker_queues[0] if active_settings.worker_queues else "scan_queue"
-    return RQScanQueueClient(redis_url=active_settings.redis_url, queue_name=queue_name)
+    return RQScanQueueClient(
+        redis_url=active_settings.redis_url,
+        queue_name=queue_name,
+        job_timeout_seconds=active_settings.scan_job_timeout_seconds,
+    )
 
 
 def get_action_queue_client(settings: Optional[Settings] = None) -> ActionQueueClient:

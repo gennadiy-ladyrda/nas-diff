@@ -11,6 +11,7 @@ x-common-env: &common-env
   HARD_DELETE_ENABLED: ${HARD_DELETE_ENABLED:-false}
   MAX_SCAN_WORKERS: ${MAX_SCAN_WORKERS:-2}
   PHASH_DISTANCE_THRESHOLD: ${PHASH_DISTANCE_THRESHOLD:-8}
+  SCAN_JOB_TIMEOUT_SECONDS: ${SCAN_JOB_TIMEOUT_SECONDS:-7200}
   DB_ALLOW_DESTRUCTIVE_MIGRATIONS: ${DB_ALLOW_DESTRUCTIVE_MIGRATIONS:-false}
 
 services:
@@ -31,6 +32,18 @@ services:
       - ./config:/config:ro
       - ${HOST_DATA_DIR:-${HOME}/.nas-diff/data}:/data
       - ${NAS_MOUNT_PATH:-/volume1}:/nas
+
+  frontend:
+    build:
+      context: ./frontend
+      dockerfile: Dockerfile
+    image: nas-diff-frontend:0.1.0
+    container_name: nas-diff-frontend
+    restart: unless-stopped
+    depends_on:
+      - api
+    ports:
+      - "${FRONTEND_PORT:-15173}:80"
 
   worker:
     image: nas-diff-api:0.1.0

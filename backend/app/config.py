@@ -57,6 +57,7 @@ class Settings:
     hard_delete_enabled: bool
     max_scan_workers: int
     phash_distance_threshold: int
+    scan_job_timeout_seconds: int
     worker_queues: tuple[str, ...]
     db_allow_destructive_migrations: bool
 
@@ -79,6 +80,7 @@ def get_settings() -> Settings:
         hard_delete_enabled=_parse_bool(os.getenv("HARD_DELETE_ENABLED"), default=False),
         max_scan_workers=_parse_int(os.getenv("MAX_SCAN_WORKERS"), default=2),
         phash_distance_threshold=_parse_int(os.getenv("PHASH_DISTANCE_THRESHOLD"), default=8),
+        scan_job_timeout_seconds=_parse_int(os.getenv("SCAN_JOB_TIMEOUT_SECONDS"), default=7200),
         worker_queues=_parse_csv(os.getenv("WORKER_QUEUES"), ("scan_queue", "action_queue")),
         db_allow_destructive_migrations=_parse_bool(
             os.getenv("DB_ALLOW_DESTRUCTIVE_MIGRATIONS"),

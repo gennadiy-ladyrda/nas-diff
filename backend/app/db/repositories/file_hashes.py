@@ -11,7 +11,14 @@ class FileHashRepository:
     def __init__(self, session: Session) -> None:
         self.session = session
 
-    def upsert(self, *, file_id: int, hash_type: str, hash_hex: str) -> FileHash:
+    def upsert(
+        self,
+        *,
+        file_id: int,
+        hash_type: str,
+        hash_hex: str,
+        autocommit: bool = True,
+    ) -> FileHash:
         existing = self.get(file_id=file_id, hash_type=hash_type)
         if existing is None:
             file_hash = FileHash(file_id=file_id, hash_type=hash_type, hash_hex=hash_hex)
@@ -20,12 +27,19 @@ class FileHashRepository:
             file_hash = existing
             file_hash.hash_hex = hash_hex
 
-        try:
-            self.session.commit()
-        except IntegrityError:
-            self.session.rollback()
-            raise
-        self.session.refresh(file_hash)
+        if autocommit:
+            try:
+                self.session.commit()
+            except IntegrityError:
+                self.session.rollback()
+                raise
+            self.session.refresh(file_hash)
+        else:
+            try:
+                self.session.flush()
+            except IntegrityError:
+                self.session.rollback()
+                raise
         return file_hash
 
     def get(self, *, file_id: int, hash_type: str) -> FileHash | None:

@@ -38,6 +38,7 @@ def test_settings(tmp_path) -> Settings:
         hard_delete_enabled=False,
         max_scan_workers=1,
         phash_distance_threshold=8,
+        scan_job_timeout_seconds=3600,
         worker_queues=("scan_queue", "action_queue"),
         db_allow_destructive_migrations=False,
     )

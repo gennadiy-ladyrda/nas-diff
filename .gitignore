@@ -203,6 +203,12 @@ cython_debug/
 .cursorignore
 .cursorindexingignore
 
+# Frontend artifacts
+frontend/node_modules/
+frontend/dist/
+frontend/playwright-report/
+frontend/test-results/
+
 # Marimo
 marimo/_static/
 marimo/_lsp/
