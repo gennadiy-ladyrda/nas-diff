@@ -6,6 +6,52 @@
 
 ## [Unreleased]
 
+## [2026-03-14] ACT-02 - Bulk actions preview, scoped selection и staged destructive confirm
+
+### Added
+- Новый API endpoint `POST /api/v1/actions/batches/preview`:
+  - предварительный расчет последствий массовой операции;
+  - возвращает `action_type`, `file_ids`, `files_count`, `total_bytes`, `estimated_reclaimable_bytes`.
+- В `ReviewPage` добавлены bulk scopes:
+  - `selected`;
+  - `all_in_group`;
+  - `all_filtered`.
+- Новый обязательный UI-шаг `Preview Impact` перед созданием draft batch.
+- Усиленный destructive confirm для `delete_permanent`:
+  - checkbox-подтверждение;
+  - отдельный confirm-step при `Confirm Batch`.
+
+### Changed
+- `backend/app/services/action_service.py`:
+  - добавлен preview-flow с валидацией action/file ids;
+  - для `restore` preview требует наличие unrestored movement.
+- `backend/app/api/routes_actions.py`:
+  - добавлена модель/роут сериализации preview ответа и обработка `404/422`.
+- `frontend/src/pages/ReviewPage.jsx`:
+  - создание draft batch теперь блокируется без preview;
+  - расширен execution report (`pending/done/failed/skipped`);
+  - rollback доступен как быстрый action только для `move_to_trash` batches в `executed/partially_failed`.
+- `frontend/src/api/client.js`:
+  - добавлен метод `previewActionBatch(payload)`.
+- `docs/specification.md`:
+  - `POST /api/v1/actions/batches/preview` переведен из planned в реализованный endpoint.
+
+### Tests
+- `backend/tests/api/test_act_01_actions.py`:
+  - добавлены тесты preview `counts/bytes` и `restore`-ограничения.
+- `frontend/tests/component/review-page.test.jsx`:
+  - обновлен flow под preview-first;
+  - добавлен кейс `all_filtered` scope.
+- `frontend/tests/e2e/review-actions.spec.js`:
+  - обновлен smoke-flow с обязательным preview перед draft.
+
+### Validation
+- `PYTHONPYCACHEPREFIX=/tmp/python-pycache python3 -m compileall backend/app backend/tests frontend/src`.
+- `PYTHONPATH=. /tmp/nas-diff-venv/bin/python -m pytest -q backend/tests/api/test_act_01_actions.py backend/tests/api/test_qa_01_regression.py` -> `6 passed`.
+- `PYTHONPATH=. /tmp/nas-diff-venv/bin/python -m pytest -q backend/tests` -> `34 passed`.
+- `docker compose config`.
+- Ограничение текущего sandbox: `node/npm` отсутствуют, поэтому `vitest/playwright` не запускались.
+
 ## [2026-03-14] HOTFIX-UI-POLLING-01 + API-03 stale running cleanup
 
 ### Added

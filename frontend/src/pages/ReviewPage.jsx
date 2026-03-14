@@ -1,10 +1,11 @@
-import { useEffect, useMemo, useState } from "react";
+import { useEffect, useMemo, useRef, useState } from "react";
 
 import {
   confirmActionBatch,
   createActionBatch,
   getActionBatch,
   getGroupDetails,
+  previewActionBatch,
   getScanJobGroups,
   rollbackActionBatch,
   saveGroupDecision,
@@ -16,6 +17,45 @@ import { usePolling } from "../hooks/usePolling";
 import { formatBytes, toShortPath } from "../utils/format";
 
 const DECISIONS = ["keep", "trash", "delete", "ignore"];
+const BULK_SCOPES = [
+  { value: "selected", label: "selected" },
+  { value: "all_in_group", label: "all in group" },
+  { value: "all_filtered", label: "all filtered" },
+];
+
+function parseApiError(err) {
+  const raw = err instanceof Error ? err.message : String(err);
+  const match = raw.match(/^(\d+):\s*(.*)$/);
+  if (!match) {
+    return { status: null, detail: raw };
+  }
+  return {
+    status: Number(match[1]),
+    detail: match[2] || raw,
+  };
+}
+
+function collectNonPrimaryFileIds(items = []) {
+  return items.filter((item) => !item.is_primary).map((item) => item.file_id);
+}
+
+function buildPreviewSignature({
+  jobId,
+  kind,
+  scope,
+  actionType,
+  groupId,
+  fileIds,
+}) {
+  return [
+    jobId || "none",
+    kind,
+    scope,
+    actionType,
+    String(groupId ?? "none"),
+    fileIds.join(","),
+  ].join("|");
+}
 
 export function ReviewPage({ activeJobId, recentJobIds, onSelectJob }) {
   const [jobInput, setJobInput] = useState(activeJobId || "");
@@ -26,13 +66,22 @@ export function ReviewPage({ activeJobId, recentJobIds, onSelectJob }) {
   const [selectedGroupId, setSelectedGroupId] = useState(null);
   const [groupDetails, setGroupDetails] = useState(null);
   const [selectedFileIds, setSelectedFileIds] = useState(new Set());
+  const [selectionScope, setSelectionScope] = useState("selected");
   const [actionType, setActionType] = useState("move_to_trash");
   const [confirmHardDelete, setConfirmHardDelete] = useState(false);
+  const [preview, setPreview] = useState(null);
+  const [previewLoading, setPreviewLoading] = useState(false);
   const [batch, setBatch] = useState(null);
   const [error, setError] = useState("");
   const [savingDecisionId, setSavingDecisionId] = useState(null);
+  const groupDetailsCacheRef = useRef(new Map());
 
-  const selectableFileIds = useMemo(() => Array.from(selectedFileIds), [selectedFileIds]);
+  const selectableFileIds = useMemo(() => Array.from(selectedFileIds).sort((a, b) => a - b), [selectedFileIds]);
+  const filteredGroupIdsMarker = useMemo(() => groups.map((group) => group.id).join(","), [groups]);
+
+  function buildGroupCacheKey(groupId) {
+    return `${activeJobId || "none"}:${kind}:${groupId}`;
+  }
 
   async function loadGroups(targetJobId) {
     if (!targetJobId) {
@@ -51,7 +100,8 @@ export function ReviewPage({ activeJobId, recentJobIds, onSelectJob }) {
         return payload.items[0]?.id ?? null;
       });
     } catch (err) {
-      setError(`Failed to load groups: ${err.message}`);
+      const parsed = parseApiError(err);
+      setError(`Failed to load groups: ${parsed.detail}`);
     } finally {
       setGroupsLoading(false);
     }
@@ -66,8 +116,10 @@ export function ReviewPage({ activeJobId, recentJobIds, onSelectJob }) {
     try {
       const payload = await getGroupDetails(kind, groupId);
       setGroupDetails(payload);
+      groupDetailsCacheRef.current.set(buildGroupCacheKey(groupId), payload);
     } catch (err) {
-      setError(`Failed to load group details: ${err.message}`);
+      const parsed = parseApiError(err);
+      setError(`Failed to load group details: ${parsed.detail}`);
     }
   }
 
@@ -80,11 +132,14 @@ export function ReviewPage({ activeJobId, recentJobIds, onSelectJob }) {
       const payload = await getActionBatch(batchId);
       setBatch(payload);
     } catch (err) {
-      setError(`Failed to load action batch: ${err.message}`);
+      const parsed = parseApiError(err);
+      setError(`Failed to load action batch: ${parsed.detail}`);
     }
   }
 
   useEffect(() => {
+    groupDetailsCacheRef.current.clear();
+    setPreview(null);
     setJobInput(activeJobId || "");
     if (activeJobId) {
       void loadGroups(activeJobId);
@@ -103,8 +158,26 @@ export function ReviewPage({ activeJobId, recentJobIds, onSelectJob }) {
       return;
     }
 
-    setSelectedFileIds(new Set(groupDetails.items.filter((item) => !item.is_primary).map((item) => item.file_id)));
+    setSelectedFileIds(new Set(collectNonPrimaryFileIds(groupDetails.items)));
   }, [groupDetails?.group_id]);
+
+  useEffect(() => {
+    setPreview(null);
+  }, [
+    actionType,
+    selectionScope,
+    selectedGroupId,
+    activeJobId,
+    kind,
+    selectableFileIds.join(","),
+    filteredGroupIdsMarker,
+  ]);
+
+  useEffect(() => {
+    if (actionType !== "delete_permanent") {
+      setConfirmHardDelete(false);
+    }
+  }, [actionType]);
 
   usePolling(
     () => {
@@ -123,7 +196,7 @@ export function ReviewPage({ activeJobId, recentJobIds, onSelectJob }) {
       }
     },
     2500,
-    Boolean(batch?.status && ["confirmed", "draft"].includes(batch.status)),
+    Boolean(batch?.status && ["confirmed", "draft", "partially_failed"].includes(batch.status)),
   );
 
   function toggleFileSelection(fileId, checked) {
@@ -147,28 +220,103 @@ export function ReviewPage({ activeJobId, recentJobIds, onSelectJob }) {
     try {
       await saveGroupDecision(kind, selectedGroupId, { file_id: fileId, decision });
       await loadGroupDetails(selectedGroupId);
+      setPreview(null);
     } catch (err) {
-      setError(`Failed to save decision: ${err.message}`);
+      const parsed = parseApiError(err);
+      setError(`Failed to save decision: ${parsed.detail}`);
     } finally {
       setSavingDecisionId(null);
     }
   }
 
+  async function resolveFileIdsForScope(scope) {
+    if (scope === "selected") {
+      return selectableFileIds;
+    }
+
+    if (scope === "all_in_group") {
+      return collectNonPrimaryFileIds(groupDetails?.items || []);
+    }
+
+    if (scope === "all_filtered") {
+      if (!activeJobId) {
+        return [];
+      }
+      const resolved = new Set();
+
+      for (const group of groups) {
+        const key = buildGroupCacheKey(group.id);
+        let details = groupDetailsCacheRef.current.get(key);
+        if (!details) {
+          details = await getGroupDetails(kind, group.id);
+          groupDetailsCacheRef.current.set(key, details);
+        }
+
+        for (const fileId of collectNonPrimaryFileIds(details.items || [])) {
+          resolved.add(fileId);
+        }
+      }
+
+      return Array.from(resolved).sort((a, b) => a - b);
+    }
+
+    return [];
+  }
+
+  async function handlePreviewBatch(event) {
+    event.preventDefault();
+
+    setPreviewLoading(true);
+    try {
+      const resolvedFileIds = await resolveFileIdsForScope(selectionScope);
+      if (resolvedFileIds.length === 0) {
+        setPreview(null);
+        setError("Preview requires at least one file in the selected scope.");
+        return;
+      }
+
+      const previewPayload = await previewActionBatch({
+        action_type: actionType,
+        file_ids: resolvedFileIds,
+      });
+
+      setPreview({
+        ...previewPayload,
+        selection_scope: selectionScope,
+        signature: buildPreviewSignature({
+          jobId: activeJobId,
+          kind,
+          scope: selectionScope,
+          actionType,
+          groupId: selectedGroupId,
+          fileIds: previewPayload.file_ids || resolvedFileIds,
+        }),
+      });
+    } catch (err) {
+      const parsed = parseApiError(err);
+      setError(`Failed to preview action batch: ${parsed.detail}`);
+    } finally {
+      setPreviewLoading(false);
+    }
+  }
+
   async function handleCreateBatch(event) {
     event.preventDefault();
-    if (selectableFileIds.length === 0) {
+    if (!preview) {
+      setError("Run preview before creating a draft batch.");
       return;
     }
 
     try {
       const payload = await createActionBatch({
         action_type: actionType,
-        file_ids: selectableFileIds,
-        summary: `${kind}:group=${selectedGroupId}`,
+        file_ids: preview.file_ids,
+        summary: `${kind}:scope=${preview.selection_scope};group=${selectedGroupId ?? "none"}`,
       });
       setBatch(payload);
     } catch (err) {
-      setError(`Failed to create action batch: ${err.message}`);
+      const parsed = parseApiError(err);
+      setError(`Failed to create action batch: ${parsed.detail}`);
     }
   }
 
@@ -177,13 +325,29 @@ export function ReviewPage({ activeJobId, recentJobIds, onSelectJob }) {
       return;
     }
 
+    if (batch.action_type === "delete_permanent") {
+      if (!confirmHardDelete) {
+        setError("Explicit destructive confirmation is required for delete_permanent.");
+        return;
+      }
+
+      const hardDeleteConfirmed = window.confirm(
+        `Permanently delete ${batch.stats?.total ?? 0} file(s)? ` +
+          "This action is irreversible.",
+      );
+      if (!hardDeleteConfirmed) {
+        return;
+      }
+    }
+
     try {
       await confirmActionBatch(batch.batch_id, {
-        confirm_delete_permanent: actionType === "delete_permanent" ? confirmHardDelete : false,
+        confirm_delete_permanent: batch.action_type === "delete_permanent",
       });
       await loadBatch(batch.batch_id);
     } catch (err) {
-      setError(`Failed to confirm batch: ${err.message}`);
+      const parsed = parseApiError(err);
+      setError(`Failed to confirm batch: ${parsed.detail}`);
     }
   }
 
@@ -196,7 +360,8 @@ export function ReviewPage({ activeJobId, recentJobIds, onSelectJob }) {
       const payload = await rollbackActionBatch(batch.batch_id, { requested_by: "local_admin" });
       await loadBatch(payload.rollback_batch_id);
     } catch (err) {
-      setError(`Failed to rollback batch: ${err.message}`);
+      const parsed = parseApiError(err);
+      setError(`Failed to rollback batch: ${parsed.detail}`);
     }
   }
 
@@ -323,13 +488,23 @@ export function ReviewPage({ activeJobId, recentJobIds, onSelectJob }) {
       <Panel title="Action Center" subtitle="Draft -> confirm -> execute -> rollback">
         <form className="stack" onSubmit={handleCreateBatch}>
           <div className="inline-form">
-            <select value={actionType} onChange={(event) => setActionType(event.target.value)}>
+            <select aria-label="action-type" value={actionType} onChange={(event) => setActionType(event.target.value)}>
               <option value="move_to_trash">move_to_trash</option>
               <option value="delete_permanent">delete_permanent</option>
               <option value="restore">restore</option>
             </select>
-            <button type="submit" className="button" disabled={selectableFileIds.length === 0}>
-              Create Draft Batch ({selectableFileIds.length})
+            <select aria-label="bulk-scope" value={selectionScope} onChange={(event) => setSelectionScope(event.target.value)}>
+              {BULK_SCOPES.map((scope) => (
+                <option key={scope.value} value={scope.value}>
+                  {scope.label}
+                </option>
+              ))}
+            </select>
+            <button type="button" className="button button--ghost" onClick={handlePreviewBatch} disabled={previewLoading}>
+              {previewLoading ? "Previewing..." : "Preview Impact"}
+            </button>
+            <button type="submit" className="button" disabled={!preview || preview.files_count === 0}>
+              Create Draft Batch ({preview?.files_count ?? 0})
             </button>
           </div>
 
@@ -343,6 +518,31 @@ export function ReviewPage({ activeJobId, recentJobIds, onSelectJob }) {
               <span>I understand this is irreversible and requires explicit confirmation.</span>
             </label>
           ) : null}
+
+          {preview ? (
+            <div className="warning-box" data-testid="action-preview-card">
+              <strong>Preview</strong>
+              <div className="hint">
+                scope={preview.selection_scope}, action={preview.action_type}
+              </div>
+              <div className="metric-grid">
+                <div>
+                  <span className="hint">Files</span>
+                  <div>{preview.files_count}</div>
+                </div>
+                <div>
+                  <span className="hint">Total size</span>
+                  <div>{formatBytes(preview.total_bytes)}</div>
+                </div>
+                <div>
+                  <span className="hint">Estimated reclaimable</span>
+                  <div>{formatBytes(preview.estimated_reclaimable_bytes)}</div>
+                </div>
+              </div>
+            </div>
+          ) : (
+            <p className="hint">Run preview before creating a draft batch.</p>
+          )}
 
           {batch ? (
             <div className="batch-card" data-testid="batch-card">
@@ -368,6 +568,14 @@ export function ReviewPage({ activeJobId, recentJobIds, onSelectJob }) {
                   <span className="hint">Failed</span>
                   <div>{batch.stats?.failed ?? 0}</div>
                 </div>
+                <div>
+                  <span className="hint">Skipped</span>
+                  <div>{batch.stats?.skipped ?? 0}</div>
+                </div>
+                <div>
+                  <span className="hint">Pending</span>
+                  <div>{batch.stats?.pending ?? 0}</div>
+                </div>
               </div>
 
               <div className="inline-actions">
@@ -375,7 +583,9 @@ export function ReviewPage({ activeJobId, recentJobIds, onSelectJob }) {
                   type="button"
                   className="button"
                   onClick={() => void handleConfirmBatch()}
-                  disabled={batch.status !== "draft" || (actionType === "delete_permanent" && !confirmHardDelete)}
+                  disabled={
+                    batch.status !== "draft" || (batch.action_type === "delete_permanent" && !confirmHardDelete)
+                  }
                 >
                   Confirm Batch
                 </button>
@@ -390,7 +600,11 @@ export function ReviewPage({ activeJobId, recentJobIds, onSelectJob }) {
                   type="button"
                   className="button button--ghost"
                   onClick={() => void handleRollback()}
-                  disabled={!batch.status || !["executed", "partially_failed"].includes(batch.status)}
+                  disabled={
+                    batch.action_type !== "move_to_trash" ||
+                    !batch.status ||
+                    !["executed", "partially_failed"].includes(batch.status)
+                  }
                 >
                   Rollback
                 </button>

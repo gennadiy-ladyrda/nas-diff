@@ -85,6 +85,21 @@ test("reviews group, creates action batch, confirms execution", async ({ page })
       return;
     }
 
+    if (url.endsWith("/api/v1/actions/batches/preview") && method === "POST") {
+      await route.fulfill({
+        status: 200,
+        contentType: "application/json",
+        body: JSON.stringify({
+          action_type: "move_to_trash",
+          file_ids: [501],
+          files_count: 1,
+          total_bytes: 108,
+          estimated_reclaimable_bytes: 108,
+        }),
+      });
+      return;
+    }
+
     if (url.endsWith("/api/v1/actions/batches/batch-e2e-1/confirm") && method === "POST") {
       batchStatus = "executed";
       await route.fulfill({
@@ -138,6 +153,8 @@ test("reviews group, creates action batch, confirms execution", async ({ page })
   await page.getByRole("button", { name: "Load" }).click();
 
   await expect(page.getByTestId("group-details-table")).toBeVisible();
+  await page.getByRole("button", { name: "Preview Impact" }).click();
+  await expect(page.getByTestId("action-preview-card")).toBeVisible();
 
   await page.getByRole("button", { name: "Create Draft Batch (1)" }).click();
   await expect(page.getByTestId("batch-card")).toContainText("draft");

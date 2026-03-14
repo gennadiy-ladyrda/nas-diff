@@ -144,8 +144,8 @@
 - Тело: `{ file_id, decision }`
 
 ### Actions
-- `POST /api/v1/actions/batches/preview` (планируемый endpoint)
-- Возвращает последствия массовой операции до confirm
+- `POST /api/v1/actions/batches/preview`
+- Возвращает последствия массовой операции до confirm (`files_count`, `total_bytes`, `estimated_reclaimable_bytes`)
 
 - `POST /api/v1/actions/batches`
 - Создает draft batch

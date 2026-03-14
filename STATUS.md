@@ -5,7 +5,7 @@
 ## 1. Общий статус проекта
 - Текущая стадия: v1 baseline закрыт по backend, UI, QA и ops-документации.
 - Продуктовый режим безопасности: `move_to_trash` по умолчанию, `HARD_DELETE_ENABLED=false`.
-- Ближайший фокус: `ACT-02 + QA-02` (безопасные bulk-операции и финальная регрессия UX).
+- Ближайший фокус: `QA-02` (финальная регрессия roots/jobs/bulk UX после ACT-02).
 
 ## 2. Прогресс по backlog
 | Task | Статус | Комментарий |
@@ -26,7 +26,7 @@
 | API-03 | done | Реализованы `GET /scan/jobs` (filters/pagination/sort) и `DELETE /scan/jobs/{job_id}` с проверкой зависимостей. |
 | UI-03 | done | Dashboard переработан в двухколоночный layout, добавлен delete roots с confirm-step и понятными error-messages. |
 | UI-04 | done | Добавлены jobs table (filters/sort/pagination), detail panel по клику и display-name `SCAN-<MODE>-<SEQ>`. |
-| ACT-02 | todo | Не начато: безопасные групповые операции и preview последствий. |
+| ACT-02 | done | Реализованы bulk scopes (`selected/all_in_group/all_filtered`), preview endpoint и staged confirm для destructive flow. |
 | QA-02 | todo | Не начато: регрессия для roots/jobs/bulk UX. |
 
 ## 3. Детали выполнения INFRA-01
@@ -48,7 +48,7 @@
 - В рабочем каталоге может оставаться legacy-файл `data/nas_diff.db`; актуальный путь хранения БД перенесен в `~/.nas-diff/data`.
 
 ## 6. Следующий практический шаг
-- Выполнить `tasks/ACT-02.md` как основу для `QA-02` (bulk preview + confirm + execute/rollback flow).
+- Выполнить `tasks/QA-02.md` (регрессия roots/jobs/bulk UX и финальная стабилизация сценариев v1).
 
 ## 7. Детали выполнения DB-01
 - Добавлен DB-layer на `SQLAlchemy 2.x`:
@@ -310,5 +310,28 @@
 - `PYTHONPYCACHEPREFIX=/tmp/python-pycache python3 -m compileall backend/app backend/tests frontend/src` -> ok.
 - `PYTHONPATH=. /tmp/nas-diff-venv/bin/python -m pytest -q backend/tests/api/test_api_03_scan_jobs_catalog.py` -> `7 passed`.
 - `PYTHONPATH=. /tmp/nas-diff-venv/bin/python -m pytest -q backend/tests` -> `32 passed`.
+- `docker compose config` -> ok.
+- Ограничение окружения: `node/npm` отсутствуют, поэтому frontend `vitest/playwright` не запускались в текущем sandbox.
+
+## 32. Детали выполнения ACT-02
+- Backend:
+  - добавлен endpoint `POST /api/v1/actions/batches/preview`;
+  - в `ActionService` добавлен расчет preview последствий (`files_count`, `total_bytes`, `estimated_reclaimable_bytes`) с валидацией action/file_ids;
+  - для `restore` preview проверяет наличие unrestored movement и не допускает silent-fail.
+- Frontend (`ReviewPage`):
+  - добавлены bulk scopes: `selected`, `all_in_group`, `all_filtered`;
+  - добавлен обязательный шаг `Preview Impact` перед созданием draft batch;
+  - создание draft batch блокируется до получения preview;
+  - для `delete_permanent` добавлен усиленный staged-confirm (checkbox + отдельный confirm при подтверждении batch);
+  - execution report расширен метриками `pending/done/failed/skipped`;
+  - rollback оставлен быстрым действием для `move_to_trash` (`executed/partially_failed`).
+- Tests:
+  - backend API tests расширены сценариями preview;
+  - frontend component/e2e тесты обновлены под новый preview-first flow и `all_filtered` scope.
+
+## 33. Проверки по ACT-02
+- `PYTHONPYCACHEPREFIX=/tmp/python-pycache python3 -m compileall backend/app backend/tests frontend/src` -> ok.
+- `PYTHONPATH=. /tmp/nas-diff-venv/bin/python -m pytest -q backend/tests/api/test_act_01_actions.py backend/tests/api/test_qa_01_regression.py` -> `6 passed`.
+- `PYTHONPATH=. /tmp/nas-diff-venv/bin/python -m pytest -q backend/tests` -> `34 passed`.
 - `docker compose config` -> ok.
 - Ограничение окружения: `node/npm` отсутствуют, поэтому frontend `vitest/playwright` не запускались в текущем sandbox.

@@ -117,6 +117,13 @@ export function createActionBatch(payload) {
   });
 }
 
+export function previewActionBatch(payload) {
+  return request("/actions/batches/preview", {
+    method: "POST",
+    body: JSON.stringify(payload),
+  });
+}
+
 export function getActionBatch(batchId) {
   return request(`/actions/batches/${batchId}`);
 }

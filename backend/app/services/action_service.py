@@ -3,6 +3,7 @@ from __future__ import annotations
 import os
 import shutil
 import uuid
+from dataclasses import dataclass
 from pathlib import Path
 
 from sqlalchemy.orm import Session
@@ -13,6 +14,15 @@ from app.db.repositories import ActionItemPayload, ActionRepository, FileReposit
 from app.workers.queue import ActionQueueClient
 
 _ALLOWED_ACTION_TYPES = {"move_to_trash", "delete_permanent", "restore"}
+
+
+@dataclass(frozen=True)
+class ActionBatchPreview:
+    action_type: str
+    file_ids: list[int]
+    files_count: int
+    total_bytes: int
+    estimated_reclaimable_bytes: int
 
 
 class ActionService:
@@ -31,9 +41,7 @@ class ActionService:
         dry_run: bool = False,
         summary: str | None = None,
     ) -> ActionBatch:
-        normalized_action = action_type.strip().lower()
-        if normalized_action not in _ALLOWED_ACTION_TYPES:
-            raise ValueError("action_type must be one of: move_to_trash, delete_permanent, restore")
+        normalized_action = _normalize_action_type(action_type)
 
         normalized_file_ids = _normalize_file_ids(file_ids)
         if not normalized_file_ids:
@@ -50,6 +58,34 @@ class ActionService:
         )
         self.actions.add_items(batch_id=batch.id, items=items)
         return batch
+
+    def preview_batch(
+        self,
+        *,
+        action_type: str,
+        file_ids: list[int],
+    ) -> ActionBatchPreview:
+        normalized_action = _normalize_action_type(action_type)
+        normalized_file_ids = _normalize_file_ids(file_ids)
+        if not normalized_file_ids:
+            raise ValueError("file_ids must not be empty")
+
+        files = self._load_files(normalized_file_ids)
+        total_bytes = sum(int(file_obj.size_bytes or 0) for file_obj in files)
+
+        if normalized_action == "restore":
+            for file_obj in files:
+                movement = self.actions.get_latest_unrestored_movement(file_id=file_obj.id)
+                if movement is None:
+                    raise LookupError(f"no unrestored movement found for file_id={file_obj.id}")
+
+        return ActionBatchPreview(
+            action_type=normalized_action,
+            file_ids=[file_obj.id for file_obj in files],
+            files_count=len(files),
+            total_bytes=total_bytes,
+            estimated_reclaimable_bytes=total_bytes if normalized_action != "restore" else 0,
+        )
 
     def create_rollback_batch(
         self,
@@ -343,6 +379,13 @@ def _normalize_file_ids(file_ids: list[int]) -> list[int]:
         seen.add(file_id)
         normalized.append(file_id)
     return normalized
+
+
+def _normalize_action_type(action_type: str) -> str:
+    normalized_action = action_type.strip().lower()
+    if normalized_action not in _ALLOWED_ACTION_TYPES:
+        raise ValueError("action_type must be one of: move_to_trash, delete_permanent, restore")
+    return normalized_action
 
 
 def _next_available_path(path: Path) -> Path:

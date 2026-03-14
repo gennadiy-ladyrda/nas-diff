@@ -14,6 +14,7 @@ def _insert_root_and_file(
     root_path: str,
     file_abs_path: str,
     rel_path: str,
+    size_bytes: int = 256,
 ) -> int:
     root_id = session.execute(
         text("INSERT INTO scan_roots(path, enabled) VALUES (:path, 1)"),
@@ -33,7 +34,7 @@ def _insert_root_and_file(
             "rel_path": rel_path,
             "abs_path": file_abs_path,
             "file_name": Path(rel_path).name,
-            "size_bytes": 256,
+            "size_bytes": size_bytes,
             "mtime_epoch_ns": 123,
         },
     ).lastrowid
@@ -204,3 +205,78 @@ def test_action_failure_is_recorded_in_item_error_message(
     assert payload["status"] == "failed"
     assert payload["stats"]["failed"] == 1
     assert payload["items"][0]["error_message"]
+
+
+def test_actions_preview_returns_counts_and_bytes(
+    api_client,
+    api_session_factory: sessionmaker[Session],
+    tmp_path,
+) -> None:
+    dataset_root_a = tmp_path / "actions-preview-a"
+    dataset_root_b = tmp_path / "actions-preview-b"
+    dataset_root_a.mkdir(parents=True, exist_ok=True)
+    dataset_root_b.mkdir(parents=True, exist_ok=True)
+    file_a = dataset_root_a / "a.jpg"
+    file_b = dataset_root_b / "b.jpg"
+    file_a.write_bytes(b"A" * 128)
+    file_b.write_bytes(b"B" * 512)
+
+    with api_session_factory() as session:
+        file_id_a = _insert_root_and_file(
+            session,
+            root_path=str(dataset_root_a),
+            file_abs_path=str(file_a),
+            rel_path="a.jpg",
+            size_bytes=128,
+        )
+        file_id_b = _insert_root_and_file(
+            session,
+            root_path=str(dataset_root_b),
+            file_abs_path=str(file_b),
+            rel_path="b.jpg",
+            size_bytes=512,
+        )
+
+    preview_response = api_client.post(
+        "/api/v1/actions/batches/preview",
+        json={
+            "action_type": "move_to_trash",
+            "file_ids": [file_id_a, file_id_b],
+        },
+    )
+    assert preview_response.status_code == 200
+    payload = preview_response.json()
+    assert payload["action_type"] == "move_to_trash"
+    assert payload["files_count"] == 2
+    assert payload["total_bytes"] == 640
+    assert payload["estimated_reclaimable_bytes"] == 640
+
+
+def test_actions_preview_restore_requires_unrestored_movements(
+    api_client,
+    api_session_factory: sessionmaker[Session],
+    tmp_path,
+) -> None:
+    dataset_root = tmp_path / "actions-preview-restore"
+    dataset_root.mkdir(parents=True, exist_ok=True)
+    file_restore = dataset_root / "restore-me.jpg"
+    file_restore.write_bytes(b"R" * 32)
+
+    with api_session_factory() as session:
+        file_id = _insert_root_and_file(
+            session,
+            root_path=str(dataset_root),
+            file_abs_path=str(file_restore),
+            rel_path="restore-me.jpg",
+            size_bytes=32,
+        )
+
+    preview_response = api_client.post(
+        "/api/v1/actions/batches/preview",
+        json={
+            "action_type": "restore",
+            "file_ids": [file_id],
+        },
+    )
+    assert preview_response.status_code == 404
+    assert "no unrestored movement found" in preview_response.json()["detail"]
