@@ -6,6 +6,122 @@
 
 ## [Unreleased]
 
+## [2026-03-14] HOTFIX-UI-POLLING-01 + API-03 stale running cleanup
+
+### Added
+- API `DELETE /api/v1/scan/jobs/{job_id}` расширен query-параметром `allow_stale_running=true` для удаления stale `queued/running` jobs по явному подтверждению оператора.
+- В dashboard jobs table добавлена колонка `Progress` с динамическим progress-bar по каждому job.
+- В component test dashboard добавлен сценарий двухшагового удаления stale running job (обычный delete -> retry с `allow_stale_running=true`).
+
+### Changed
+- `backend/app/api/routes_scan.py`:
+  - удаление `queued/running` job теперь возможно только при двух условиях:
+    - передан `allow_stale_running=true`;
+    - job старше `SCAN_JOB_TIMEOUT_SECONDS` (stale-check по `started_at`/`requested_at`).
+  - для свежих активных jobs возвращается `409` с блокировкой удаления.
+- `frontend/src/api/client.js`:
+  - `deleteScanJob` поддерживает опцию `{ allowStaleRunning }`.
+- `frontend/src/pages/DashboardPage.jsx`:
+  - polling больше не делает full reload таблицы jobs;
+  - background polling точечно обновляет runtime-поля активных jobs (`status`, counters, reclaimable, error/finished);
+  - для `409` по active job добавлен confirm-step и retry удаления stale metadata.
+- `frontend/src/styles/global.css`:
+  - добавлены стили progress-bar (`jobs-progress*`) с плавным обновлением ширины.
+- `backend/tests/api/test_api_03_scan_jobs_catalog.py`:
+  - добавлены проверки stale-force-delete и блокировки force-delete для свежего running job.
+
+### Validation
+- `PYTHONPYCACHEPREFIX=/tmp/python-pycache python3 -m compileall backend/app backend/tests frontend/src`.
+- `PYTHONPATH=. /tmp/nas-diff-venv/bin/python -m pytest -q backend/tests/api/test_api_03_scan_jobs_catalog.py` -> `7 passed`.
+- `PYTHONPATH=. /tmp/nas-diff-venv/bin/python -m pytest -q backend/tests` -> `32 passed`.
+- `docker compose config`.
+- Ограничение текущего sandbox: `node/npm` отсутствуют, поэтому `vitest/playwright` не запускались.
+
+## [2026-03-14] UI-03 + UI-04 - Dashboard layout, roots/jobs operations и job journal UX
+
+### Added
+- В frontend API client (`frontend/src/api/client.js`) добавлены методы:
+  - `deleteScanRoot(rootId)`;
+  - `listScanJobs({status, mode, order, page, pageSize})`;
+  - `deleteScanJob(jobId)`.
+- Новый jobs journal UI на dashboard:
+  - таблица jobs с фильтрами/сортировкой/пагинацией;
+  - detail panel по выбранному job;
+  - display-name формата `SCAN-<MODE>-<SEQ>` + timestamp.
+- Поддержка безопасного удаления метаданных из UI:
+  - удаление `scan roots` с confirm-step;
+  - удаление `scan jobs` с confirm-step и обработкой safe-delete конфликтов.
+- Обновлены frontend тесты:
+  - `frontend/tests/component/dashboard-page.test.jsx`;
+  - `frontend/tests/e2e/scan-launch.spec.js`.
+
+### Changed
+- `frontend/src/pages/DashboardPage.jsx`:
+  - переработан layout в формат `left health column + right operations column`;
+  - добавлен `Scan Roots Registry` с `enabled/delete` действиями;
+  - добавлен `Scan Jobs Journal` (table + detail + delete metadata);
+  - улучшена обработка API-ошибок (человеко-читаемые сообщения для roots/jobs delete).
+- `frontend/src/App.jsx`:
+  - добавлен callback `onJobDeleted` для синхронизации recent/active job в local state.
+- `frontend/src/components/StatusBadge.jsx`:
+  - добавлен статус `canceled`.
+- `frontend/src/styles/global.css`:
+  - добавлены стили для dashboard columns, health stack, roots registry, jobs toolbar/table/pagination и active-row состояния.
+
+### Validation
+- `docker compose config`.
+- `PYTHONPATH=. /tmp/nas-diff-venv/bin/python -m pytest -q backend/tests` -> `30 passed`.
+- Ограничение текущего sandbox: `npm` отсутствует (`npm: command not found`), поэтому `vitest/playwright` не запускались.
+
+## [2026-03-14] API-03 - Каталог scan jobs и безопасное удаление
+
+### Added
+- Новый API endpoint `GET /api/v1/scan/jobs`:
+  - фильтры по `status` и `mode`;
+  - пагинация через `page` и `page_size`;
+  - сортировка по `requested_at` (`order=asc|desc`).
+- Новый API endpoint `DELETE /api/v1/scan/jobs/{job_id}` с безопасной политикой удаления.
+- Новый API-тестовый модуль:
+  - `backend/tests/api/test_api_03_scan_jobs_catalog.py`.
+
+### Changed
+- `backend/app/db/repositories/scan_jobs.py`:
+  - добавлены `list_jobs(...)`, `count_delete_dependencies(job_id)`, `delete(job_id)`;
+  - добавлена модель зависимостей удаления `ScanJobDeleteDependencies`.
+- `backend/app/api/routes_scan.py`:
+  - подключен `GET /scan/jobs`;
+  - добавлен `DELETE /scan/jobs/{job_id}` с `404/409/204` контрактом;
+  - добавлены проверки безопасного удаления:
+    - запрет удаления jobs в `queued/running`;
+    - конфликт при наличии `exact_groups`, `similar_groups`, `action_items`.
+- `backend/tests/db/test_repositories.py`:
+  - добавлены проверки list/pagination и dependency-counters для cleanup scan jobs.
+- `backend/app/db/repositories/__init__.py`:
+  - экспортирован `ScanJobDeleteDependencies`.
+
+### Validation
+- `PYTHONPYCACHEPREFIX=/tmp/python-pycache python3 -m compileall backend/app backend/tests`.
+- `PYTHONPATH=. /tmp/nas-diff-venv/bin/python -m pytest -q backend/tests/api/test_api_02_scan_jobs.py backend/tests/api/test_api_03_scan_jobs_catalog.py backend/tests/db/test_repositories.py` -> `14 passed`.
+- `PYTHONPATH=. /tmp/nas-diff-venv/bin/python -m pytest -q backend/tests` -> `30 passed`.
+- `docker compose config`.
+
+## [2026-03-13] TASKS-02 - Новый backlog задач API/UI/ACT/QA
+
+### Added
+- Новые task briefs:
+  - `tasks/API-03.md`;
+  - `tasks/UI-03.md`;
+  - `tasks/UI-04.md`;
+  - `tasks/ACT-02.md`;
+  - `tasks/QA-02.md`.
+
+### Changed
+- `tasks/README.md`: обновлен порядок backlog и список файлов задач.
+- `STATUS.md`: в progress table добавлены новые задачи со статусом `todo`; обновлен ближайший фокус.
+
+### Validation
+- Проверка структуры task-файлов на соответствие `TASK_BRIEF.md`.
+
 ## [2026-03-13] HOTFIX-SCAN-01 - Таймаут scan jobs, rollback после DB ошибок и batched commits
 
 ### Added

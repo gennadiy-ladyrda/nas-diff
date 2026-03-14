@@ -30,6 +30,9 @@
 9. `file_movements`
 - История перемещений для rollback/restore.
 
+10. (план) `scan_jobs` lifecycle metadata
+- Расширения для операционного UX: display-name/sequence и soft-delete поля.
+
 ## 2. Связи
 - Один `scan_job` связан с несколькими `scan_roots` через `scan_job_roots`.
 - Один `file` относится к одному `scan_root`.
@@ -51,6 +54,7 @@
 - Для каждого файла тип хэша уникален: `(file_id, hash_type)`.
 - Для группы уникален состав по первичному ключу `(group_id, file_id)`.
 - `action_item` уникален в рамках batch: `(batch_id, file_id)`.
+- Удаление job не должно затрагивать файловую систему NAS (только индекс/метаданные).
 
 ## 5. Жизненный цикл данных
 1. `scan_job` создается в `queued`.
@@ -65,3 +69,14 @@
 - На хосте `/data` маппится в `HOST_DATA_DIR` (по умолчанию `~/.nas-diff/data`).
 - Файлы БД не хранятся в git-репозитории (`data/` исключен через `.gitignore`).
 - Для локального запуска рекомендуется `.env.local` и команды из `justfile`.
+
+## 7. Планируемые расширения схемы (API-03 / UI-04)
+Рассматриваемые поля для `scan_jobs`:
+- `sequence_no INTEGER` — монотонный номер запуска для UI display-name.
+- `display_name TEXT` — кешированное человекочитаемое имя (`SCAN-<MODE>-<SEQ>`).
+- `deleted_at TEXT`, `deleted_by TEXT` — soft-delete/архивация jobs.
+
+Планируемые индексы:
+- `idx_scan_jobs_requested_at(requested_at DESC)` для таблицы jobs.
+- `idx_scan_jobs_status_mode(status, mode)` для UI фильтров.
+- `idx_scan_jobs_deleted_at(deleted_at)` для разделения активных и архивных jobs.

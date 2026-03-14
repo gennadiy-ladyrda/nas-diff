@@ -1,11 +1,11 @@
 # STATUS
 
-Актуально на: `2026-03-13`
+Актуально на: `2026-03-14`
 
 ## 1. Общий статус проекта
 - Текущая стадия: v1 baseline закрыт по backend, UI, QA и ops-документации.
 - Продуктовый режим безопасности: `move_to_trash` по умолчанию, `HARD_DELETE_ENABLED=false`.
-- Ближайший фокус: проверить на реальном большом каталоге scan после hotfix (`job timeout + rollback`), затем запустить полный UI regression (`vitest + playwright`) в окружении с Node.js/npm.
+- Ближайший фокус: `ACT-02 + QA-02` (безопасные bulk-операции и финальная регрессия UX).
 
 ## 2. Прогресс по backlog
 | Task | Статус | Комментарий |
@@ -23,6 +23,11 @@
 | UI-02 | done | Добавлен frontend review groups + action center (decision override, draft/confirm, rollback). |
 | QA-01 | done | Добавлены frontend component/e2e smoke tests, backend regression test и единый regression script. |
 | OPS-01 | done | Добавлен DSM6 runbook: install/update/backup/restore/troubleshooting и safety правила. |
+| API-03 | done | Реализованы `GET /scan/jobs` (filters/pagination/sort) и `DELETE /scan/jobs/{job_id}` с проверкой зависимостей. |
+| UI-03 | done | Dashboard переработан в двухколоночный layout, добавлен delete roots с confirm-step и понятными error-messages. |
+| UI-04 | done | Добавлены jobs table (filters/sort/pagination), detail panel по клику и display-name `SCAN-<MODE>-<SEQ>`. |
+| ACT-02 | todo | Не начато: безопасные групповые операции и preview последствий. |
+| QA-02 | todo | Не начато: регрессия для roots/jobs/bulk UX. |
 
 ## 3. Детали выполнения INFRA-01
 - Добавлен единый образ backend (`Python 3.11`, `FastAPI`, `RQ`, `Redis client`) для сервисов `api` и `worker`.
@@ -43,7 +48,7 @@
 - В рабочем каталоге может оставаться legacy-файл `data/nas_diff.db`; актуальный путь хранения БД перенесен в `~/.nas-diff/data`.
 
 ## 6. Следующий практический шаг
-- Выполнить `bash scripts/ci/run_s3_regression_suite.sh` в окружении с установленным `node`/`npm` и browser runtime для Playwright.
+- Выполнить `tasks/ACT-02.md` как основу для `QA-02` (bulk preview + confirm + execute/rollback flow).
 
 ## 7. Детали выполнения DB-01
 - Добавлен DB-layer на `SQLAlchemy 2.x`:
@@ -234,3 +239,76 @@
 - Добавлены регрессионные тесты:
   - `backend/tests/core/test_scan_orchestrator_failures.py` (проверка failed-status после flush error);
   - `backend/tests/api/test_worker_queue_config.py` (проверка применения timeout в queue client).
+
+## 25. Детали выполнения API-03
+- Добавлены новые endpoint'ы API scan jobs:
+  - `GET /api/v1/scan/jobs` с фильтрами `status/mode`, пагинацией (`page/page_size`) и сортировкой по `requested_at`.
+  - `DELETE /api/v1/scan/jobs/{job_id}` для удаления метаданных job без воздействия на NAS-файлы.
+- Реализована safe policy удаления:
+  - запрет удаления jobs в статусах `queued`/`running`;
+  - проверка зависимостей перед удалением (`exact_groups`, `similar_groups`, `action_items`);
+  - при зависимостях возвращается `409` с понятной причиной конфликта.
+- Расширен `ScanJobRepository`:
+  - `list_jobs(...)` для UI-каталога jobs;
+  - `count_delete_dependencies(job_id)` для валидации cleanup;
+  - `delete(job_id)` для удаления метаданных.
+- Добавлены тесты:
+  - API: `backend/tests/api/test_api_03_scan_jobs_catalog.py`;
+  - DB repository: расширение `backend/tests/db/test_repositories.py`.
+
+## 26. Проверки по API-03
+- `PYTHONPYCACHEPREFIX=/tmp/python-pycache python3 -m compileall backend/app backend/tests` -> ok.
+- `PYTHONPATH=. /tmp/nas-diff-venv/bin/python -m pytest -q backend/tests/api/test_api_02_scan_jobs.py backend/tests/api/test_api_03_scan_jobs_catalog.py backend/tests/db/test_repositories.py` -> `14 passed`.
+- `PYTHONPATH=. /tmp/nas-diff-venv/bin/python -m pytest -q backend/tests` -> `30 passed`.
+- `docker compose config` -> ok.
+
+## 27. Детали выполнения UI-03
+- Dashboard layout обновлен до операционного вида:
+  - фиксированная левая колонка `System Health`;
+  - основная правая колонка для `Scan Setup`, `Scan Roots Registry` и `Scan Jobs Journal`.
+- Реализовано удаление scan roots из UI:
+  - кнопка `Delete` для каждого root;
+  - обязательный `confirm-step`;
+  - человекочитаемые ошибки для `409/422` без потери контекста.
+- Реестр roots расширен:
+  - быстрый toggle `enabled`;
+  - сохранен безопасный инвариант (удаляются только метаданные).
+
+## 28. Детали выполнения UI-04
+- Добавлена таблица jobs:
+  - колонки `display name`, `mode/status`, `requested/finished`, files/groups counters, reclaimable bytes;
+  - фильтры `status/mode`, сортировка `newest|oldest`, пагинация.
+- Добавлена детализация job по клику:
+  - detail panel с метриками, roots, error_message;
+  - сохранен ручной вход по `job_id` (`Open Job By ID`).
+- Добавлен UI-нейминг jobs:
+  - формат `SCAN-<MODE>-<SEQ>` + timestamp;
+  - технический `job_id` всегда отображается отдельно.
+- Добавлено удаление job-метаданных из UI:
+  - action `Delete` в таблице и detail panel;
+  - confirm-step и обработка конфликтов safe-delete.
+
+## 29. Проверки по UI-03 / UI-04
+- `docker compose config` -> ok.
+- `PYTHONPATH=. /tmp/nas-diff-venv/bin/python -m pytest -q backend/tests` -> `30 passed` (проверка на отсутствие backend-регрессий после UI-интеграции).
+- Ограничение окружения: `npm` отсутствует (`npm: command not found`), поэтому `vitest` и `playwright` в текущем sandbox не запускались.
+
+## 30. Hotfix UI polling + stale running job cleanup
+- Исправлен polling в dashboard jobs journal:
+  - удален full-reload списка jobs из автоматического polling-цикла;
+  - polling обновляет только runtime-поля активных (`queued/running`) jobs;
+  - в таблицу добавлена колонка `Progress` с динамическим progress-bar, чтобы визуально обновлялся только прогресс по строкам.
+- Добавлен безопасный путь удаления stale `running/queued` jobs:
+  - `DELETE /api/v1/scan/jobs/{job_id}` поддерживает `allow_stale_running=true`;
+  - удаление активного job разрешается только при явном флаге и если job стал stale (старше `SCAN_JOB_TIMEOUT_SECONDS`);
+  - для свежих активных jobs сохраняется блокировка `409`.
+- UI удаления job обновлен:
+  - при `409` для active job появляется второй confirm-step для stale cleanup;
+  - повторный delete отправляется с `allow_stale_running=true`.
+
+## 31. Проверки по hotfix UI polling + stale cleanup
+- `PYTHONPYCACHEPREFIX=/tmp/python-pycache python3 -m compileall backend/app backend/tests frontend/src` -> ok.
+- `PYTHONPATH=. /tmp/nas-diff-venv/bin/python -m pytest -q backend/tests/api/test_api_03_scan_jobs_catalog.py` -> `7 passed`.
+- `PYTHONPATH=. /tmp/nas-diff-venv/bin/python -m pytest -q backend/tests` -> `32 passed`.
+- `docker compose config` -> ok.
+- Ограничение окружения: `node/npm` отсутствуют, поэтому frontend `vitest/playwright` не запускались в текущем sandbox.

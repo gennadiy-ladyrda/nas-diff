@@ -10,6 +10,7 @@ const STATUS_CLASS_MAP = {
   partially_failed: "badge badge--warn",
   failed: "badge badge--danger",
   draft: "badge badge--neutral",
+  canceled: "badge badge--neutral",
 };
 
 export function StatusBadge({ value }) {

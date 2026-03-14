@@ -49,6 +49,14 @@ export default function App() {
     addRecentJob(jobId);
   }
 
+  function removeRecentJob(jobId) {
+    setRecentJobIds((prev) => {
+      const next = prev.filter((value) => value !== jobId);
+      setActiveJobId((current) => (current === jobId ? (next[0] || "") : current));
+      return next;
+    });
+  }
+
   return (
     <div className="app-shell">
       <header className="topbar">
@@ -74,6 +82,7 @@ export default function App() {
                 recentJobIds={recentJobIds}
                 onSelectJob={selectJob}
                 onJobCreated={addRecentJob}
+                onJobDeleted={removeRecentJob}
               />
             }
           />

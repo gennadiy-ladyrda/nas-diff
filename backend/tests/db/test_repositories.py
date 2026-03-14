@@ -33,6 +33,36 @@ def _insert_file(session: Session, *, root_id: int, rel_path: str, abs_path: str
     return int(file_id)
 
 
+def _insert_scan_job(
+    session: Session,
+    *,
+    job_id: str,
+    mode: str,
+    status: str,
+    requested_at: str,
+) -> None:
+    session.execute(
+        text(
+            """
+            INSERT INTO scan_jobs(
+                id, mode, status, requested_at,
+                files_seen, files_indexed, exact_groups_found, similar_groups_found, reclaimable_bytes
+            )
+            VALUES (
+                :job_id, :mode, :status, :requested_at,
+                0, 0, 0, 0, 0
+            )
+            """
+        ),
+        {
+            "job_id": job_id,
+            "mode": mode,
+            "status": status,
+            "requested_at": requested_at,
+        },
+    )
+
+
 def test_scan_job_repository_crud(session: Session) -> None:
     repo = ScanJobRepository(session)
 
@@ -53,6 +83,87 @@ def test_scan_job_repository_crud(session: Session) -> None:
     )
     assert metrics.files_seen == 11
     assert metrics.reclaimable_bytes == 500
+
+
+def test_scan_job_repository_list_and_delete_dependencies(session: Session) -> None:
+    root_id, job_id = seed_root_and_job(session, job_id="job-deps")
+    repo = ScanJobRepository(session)
+
+    _insert_scan_job(
+        session,
+        job_id="job-list-old",
+        mode="exact",
+        status="completed",
+        requested_at="2026-03-13 10:00:00",
+    )
+    _insert_scan_job(
+        session,
+        job_id="job-list-new",
+        mode="both",
+        status="completed",
+        requested_at="2026-03-13 11:00:00",
+    )
+
+    file_id = _insert_file(session, root_id=root_id, rel_path="deps.jpg", abs_path="/nas/photo/deps.jpg")
+    session.execute(
+        text(
+            """
+            UPDATE files
+            SET first_seen_job_id = :job_id, last_seen_job_id = :job_id
+            WHERE id = :file_id
+            """
+        ),
+        {"job_id": job_id, "file_id": file_id},
+    )
+    session.execute(
+        text(
+            """
+            INSERT INTO exact_groups(job_id, signature, file_count, total_bytes, reclaimable_bytes)
+            VALUES (:job_id, 'sig-deps', 2, 200, 100)
+            """
+        ),
+        {"job_id": job_id},
+    )
+    session.execute(
+        text(
+            """
+            INSERT INTO similar_groups(job_id, algorithm, threshold, file_count)
+            VALUES (:job_id, 'phash64', 8, 2)
+            """
+        ),
+        {"job_id": job_id},
+    )
+    session.execute(
+        text(
+            """
+            INSERT INTO action_batches(id, status, action_type, requested_by, dry_run)
+            VALUES ('batch-deps', 'executed', 'move_to_trash', 'local_admin', 0)
+            """
+        )
+    )
+    session.execute(
+        text(
+            """
+            INSERT INTO action_items(batch_id, file_id, source_path, target_path, status)
+            VALUES ('batch-deps', :file_id, '/nas/photo/deps.jpg', '/nas/.nas-diff-trash/deps.jpg', 'done')
+            """
+        ),
+        {"file_id": file_id},
+    )
+    session.commit()
+
+    jobs, total = repo.list_jobs(status="completed", mode=None, page=1, page_size=10, order="desc")
+    assert total >= 2
+    listed_ids = [job.id for job in jobs]
+    assert "job-list-new" in listed_ids
+    assert "job-list-old" in listed_ids
+    assert listed_ids.index("job-list-new") < listed_ids.index("job-list-old")
+
+    deps = repo.count_delete_dependencies(job_id)
+    assert deps.exact_groups == 1
+    assert deps.similar_groups == 1
+    assert deps.action_items == 1
+    assert deps.has_blockers
 
 
 def test_file_repository_upsert(session: Session) -> None:

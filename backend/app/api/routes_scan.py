@@ -1,9 +1,10 @@
 from __future__ import annotations
 
+from datetime import datetime, timezone
 import uuid
 from typing import Literal, Optional
 
-from fastapi import APIRouter, Depends, HTTPException, Query, status
+from fastapi import APIRouter, Depends, HTTPException, Path, Query, Response, status
 from pydantic import BaseModel, Field
 from sqlalchemy import select
 from sqlalchemy.orm import Session
@@ -49,6 +50,28 @@ class ScanJobStatusResponse(BaseModel):
     similar_groups_found: int
     reclaimable_bytes: int
     roots: list[dict[str, object]]
+
+
+class ScanJobListItemResponse(BaseModel):
+    job_id: str
+    mode: str
+    status: str
+    requested_at: str
+    started_at: Optional[str]
+    finished_at: Optional[str]
+    error_message: Optional[str]
+    files_seen: int
+    files_indexed: int
+    exact_groups_found: int
+    similar_groups_found: int
+    reclaimable_bytes: int
+
+
+class ScanJobsListResponse(BaseModel):
+    page: int
+    page_size: int
+    total: int
+    items: list[ScanJobListItemResponse]
 
 
 class ScanJobGroupsResponse(BaseModel):
@@ -110,6 +133,50 @@ def create_scan_job(
         mode=created.mode,
         root_ids=root_ids,
         queued=True,
+    )
+
+
+@router.get("/jobs", response_model=ScanJobsListResponse)
+def list_scan_jobs(
+    page: int = Query(1, ge=1),
+    page_size: int = Query(50, ge=1, le=200),
+    job_status: Optional[Literal["queued", "running", "completed", "failed", "canceled"]] = Query(
+        default=None,
+        alias="status",
+    ),
+    mode: Optional[Literal["exact", "similar", "both"]] = Query(default=None),
+    order: Literal["asc", "desc"] = Query(default="desc"),
+    db: Session = Depends(get_db_session),
+) -> ScanJobsListResponse:
+    job_repo = ScanJobRepository(db)
+    jobs, total = job_repo.list_jobs(
+        page=page,
+        page_size=page_size,
+        status=job_status,
+        mode=mode,
+        order=order,
+    )
+    return ScanJobsListResponse(
+        page=page,
+        page_size=page_size,
+        total=total,
+        items=[
+            ScanJobListItemResponse(
+                job_id=job.id,
+                mode=job.mode,
+                status=job.status,
+                requested_at=job.requested_at,
+                started_at=job.started_at,
+                finished_at=job.finished_at,
+                error_message=job.error_message,
+                files_seen=job.files_seen,
+                files_indexed=job.files_indexed,
+                exact_groups_found=job.exact_groups_found,
+                similar_groups_found=job.similar_groups_found,
+                reclaimable_bytes=job.reclaimable_bytes,
+            )
+            for job in jobs
+        ],
     )
 
 
@@ -195,6 +262,76 @@ def get_scan_job_groups(
         total=total,
         items=serialized[start:end],
     )
+
+
+@router.delete("/jobs/{job_id}", status_code=status.HTTP_204_NO_CONTENT)
+def delete_scan_job(
+    job_id: str = Path(..., min_length=1),
+    allow_stale_running: bool = Query(default=False),
+    settings: Settings = Depends(get_settings),
+    db: Session = Depends(get_db_session),
+) -> Response:
+    job_repo = ScanJobRepository(db)
+    job = job_repo.get(job_id)
+    if job is None:
+        raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail=f"scan_job={job_id} not found")
+
+    if job.status in {"queued", "running"}:
+        if not allow_stale_running:
+            raise HTTPException(
+                status_code=status.HTTP_409_CONFLICT,
+                detail=(
+                    f"scan_job={job_id} with status='{job.status}' cannot be deleted; "
+                    "use allow_stale_running=true only for stale jobs"
+                ),
+            )
+        if not _is_stale_job(job.started_at or job.requested_at, settings.scan_job_timeout_seconds):
+            raise HTTPException(
+                status_code=status.HTTP_409_CONFLICT,
+                detail=(
+                    f"scan_job={job_id} with status='{job.status}' is not stale yet; "
+                    "metadata deletion is blocked for active jobs"
+                ),
+            )
+
+    dependencies = job_repo.count_delete_dependencies(job_id)
+    if dependencies.has_blockers:
+        raise HTTPException(
+            status_code=status.HTTP_409_CONFLICT,
+            detail=(
+                f"cannot delete scan_job={job_id}: dependent metadata exists "
+                f"(exact_groups={dependencies.exact_groups}, "
+                f"similar_groups={dependencies.similar_groups}, "
+                f"action_items={dependencies.action_items})"
+            ),
+        )
+
+    job_repo.delete(job_id)
+    return Response(status_code=status.HTTP_204_NO_CONTENT)
+
+
+def _is_stale_job(reference_timestamp: Optional[str], timeout_seconds: int) -> bool:
+    if not reference_timestamp:
+        return False
+    parsed = _parse_datetime(reference_timestamp)
+    if parsed is None:
+        return False
+    threshold = max(int(timeout_seconds), 60)
+    age_seconds = (datetime.now(timezone.utc) - parsed).total_seconds()
+    return age_seconds >= threshold
+
+
+def _parse_datetime(value: str) -> Optional[datetime]:
+    raw = value.strip()
+    if not raw:
+        return None
+    try:
+        dt = datetime.fromisoformat(raw.replace("Z", "+00:00"))
+    except ValueError:
+        return None
+    if dt.tzinfo is None:
+        return dt.replace(tzinfo=timezone.utc)
+    return dt.astimezone(timezone.utc)
 
 
 def _resolve_root_ids(requested_root_ids: Optional[list[int]], root_repo: ScanRootRepository) -> list[int]:

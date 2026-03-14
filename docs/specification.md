@@ -51,6 +51,24 @@
 - Лог всех действий на уровне файла.
 - Отчеты по освобожденному месту.
 
+### FR-8: Каталог и жизненный цикл scan jobs
+- Получение списка jobs с фильтрацией по `status/mode` и пагинацией.
+- Удаление неактуальных jobs из операционного интерфейса.
+- Для зависших `running/queued` jobs допускается явный stale-cleanup (двухшаговое подтверждение в UI + серверная stale-проверка).
+- Удаление jobs не затрагивает реальные NAS-файлы (только метаданные индекса и связанных сущностей).
+
+### FR-9: Операционный dashboard UX
+- Компактный вертикальный блок `System Health` в левой колонке dashboard.
+- Таблица jobs с быстрым обзором (`mode`, `status`, время, ключевые метрики).
+- По клику на job показывается отдельная строка/панель детального статуса.
+- Для оператора отображается человекочитаемое имя job (display-name), при сохранении технического `job_id`.
+
+### FR-10: Групповые операции над файлами
+- Массовые действия для набора файлов (`selected`, `all in group`, `all filtered`).
+- Перед confirm обязателен preview последствий (count/bytes/action).
+- Для `delete_permanent` требуется усиленный confirm-step.
+- Для `move_to_trash` доступен rollback-сценарий после исполнения.
+
 ## 5. Нефункциональные требования
 ### NFR-1: Совместимость
 - DSM6, x86, Docker.
@@ -69,6 +87,10 @@
 ### NFR-5: Наблюдаемость
 - Структурированные логи.
 - API endpoint для health и статусов.
+
+### NFR-6: Операционная управляемость
+- Оператор должен быстро найти проблемный job по таблице и детальному статусу.
+- Массовые операции должны быть безопасными по умолчанию и прозрачными по последствиям.
 
 ## 6. Конфигурация
 Обязательные параметры окружения:
@@ -101,8 +123,15 @@
 - Тело: `{ mode, roots[], options }`
 - Ответ: `{ job_id, status }`
 
+- `GET /api/v1/scan/jobs?status=&mode=&page=&page_size=`
+- Ответ: пагинированный список jobs для таблицы в UI
+
 - `GET /api/v1/scan/jobs/{job_id}`
 - Ответ: прогресс и метрики
+
+- `DELETE /api/v1/scan/jobs/{job_id}`
+- Удаление job-метаданных (safe-first; без воздействия на NAS-файлы)
+- Для stale `running/queued` jobs поддерживается `allow_stale_running=true` (иначе `409`)
 
 - `GET /api/v1/scan/jobs/{job_id}/groups?kind=exact|similar`
 - Ответ: пагинированный список групп
@@ -115,6 +144,9 @@
 - Тело: `{ file_id, decision }`
 
 ### Actions
+- `POST /api/v1/actions/batches/preview` (планируемый endpoint)
+- Возвращает последствия массовой операции до confirm
+
 - `POST /api/v1/actions/batches`
 - Создает draft batch
 
@@ -155,6 +187,8 @@
 - Unit: hashing, grouping, scoring.
 - Integration: полный цикл scan -> groups -> action batch -> execute.
 - Regression: rollback после move_to_trash.
+- UI integration: таблица jobs, detail-row и delete-root/delete-job сценарии.
+- E2E smoke: bulk preview -> confirm -> execute -> rollback.
 
 ## 12. Релизная стратегия
 1. Alpha: только Exact + ручной review.

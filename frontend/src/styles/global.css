@@ -106,6 +106,23 @@ code,
   gap: 14px;
 }
 
+.dashboard-layout {
+  display: grid;
+  grid-template-columns: minmax(250px, 300px) 1fr;
+  gap: 14px;
+  align-items: start;
+}
+
+.dashboard-health-column {
+  position: sticky;
+  top: 20px;
+}
+
+.dashboard-main-column {
+  display: grid;
+  gap: 14px;
+}
+
 .review-grid {
   display: grid;
   grid-template-columns: 1fr 2fr;
@@ -171,6 +188,11 @@ code,
   align-items: center;
 }
 
+.field-inline select {
+  width: auto;
+  min-width: 120px;
+}
+
 input,
 select,
 button {
@@ -213,6 +235,12 @@ select {
   border-color: var(--border);
   padding: 4px 8px;
   font-size: 0.78rem;
+}
+
+.tiny-button--danger {
+  color: #7f1d1d;
+  border-color: rgba(185, 28, 28, 0.35);
+  background: rgba(255, 238, 238, 0.95);
 }
 
 .button:disabled,
@@ -258,6 +286,31 @@ select {
   box-shadow: 0 0 0 3px rgba(15, 118, 110, 0.15);
 }
 
+.root-select {
+  display: inline-flex;
+  gap: 8px;
+  align-items: center;
+}
+
+.root-list--registry {
+  margin-top: 10px;
+}
+
+.root-item--registry {
+  align-items: flex-start;
+}
+
+.root-item__main {
+  display: grid;
+  gap: 2px;
+}
+
+.root-item__actions {
+  display: inline-flex;
+  gap: 8px;
+  align-items: center;
+}
+
 .switch {
   display: inline-flex;
   gap: 5px;
@@ -267,10 +320,24 @@ select {
 }
 
 .health-grid,
+.health-stack,
 .metric-grid {
   display: grid;
   grid-template-columns: repeat(auto-fit, minmax(140px, 1fr));
   gap: 10px;
+}
+
+.health-stack {
+  grid-template-columns: 1fr;
+}
+
+.health-item {
+  border: 1px solid var(--border);
+  border-radius: 10px;
+  background: rgba(255, 255, 255, 0.78);
+  padding: 8px 10px;
+  display: grid;
+  gap: 4px;
 }
 
 .job-card,
@@ -370,6 +437,64 @@ td {
   vertical-align: top;
 }
 
+.jobs-toolbar,
+.jobs-pagination {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 8px;
+  align-items: center;
+  margin-bottom: 10px;
+}
+
+.jobs-toolbar__summary {
+  margin-left: auto;
+}
+
+.jobs-row {
+  cursor: pointer;
+}
+
+.jobs-row--active {
+  background: rgba(207, 245, 234, 0.45);
+}
+
+.jobs-name {
+  display: grid;
+  gap: 3px;
+}
+
+.jobs-progress {
+  min-width: 120px;
+  display: grid;
+  gap: 4px;
+}
+
+.jobs-progress__track {
+  width: 100%;
+  height: 8px;
+  border-radius: 999px;
+  background: rgba(148, 163, 184, 0.22);
+  overflow: hidden;
+}
+
+.jobs-progress__fill {
+  height: 100%;
+  border-radius: 999px;
+  transition: width 220ms ease-out;
+}
+
+.jobs-progress__fill--active {
+  background: linear-gradient(90deg, #0f766e, #14b8a6);
+}
+
+.jobs-progress__fill--done {
+  background: linear-gradient(90deg, #1d783f, #22c55e);
+}
+
+.jobs-progress__fill--failed {
+  background: linear-gradient(90deg, #b91c1c, #ef4444);
+}
+
 .chip {
   background: rgba(230, 240, 232, 0.9);
   border-color: var(--border);
@@ -377,6 +502,14 @@ td {
 }
 
 @media (max-width: 980px) {
+  .dashboard-layout {
+    grid-template-columns: 1fr;
+  }
+
+  .dashboard-health-column {
+    position: static;
+  }
+
   .review-grid {
     grid-template-columns: 1fr;
   }
@@ -399,5 +532,10 @@ td {
   .panel__header,
   .panel__body {
     padding: 12px;
+  }
+
+  .jobs-toolbar__summary {
+    margin-left: 0;
+    width: 100%;
   }
 }
