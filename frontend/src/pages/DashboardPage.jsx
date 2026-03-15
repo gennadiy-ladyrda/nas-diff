@@ -165,12 +165,21 @@ function humanizeJobDeleteError(jobId, err) {
   return `Failed to delete job ${jobId}: ${parsed.detail}`;
 }
 
-export function DashboardPage({ activeJobId, recentJobIds, onSelectJob, onJobCreated, onJobDeleted = () => {} }) {
+export function DashboardPage({
+  variant = "advanced",
+  activeJobId,
+  recentJobIds,
+  onSelectJob,
+  onJobCreated,
+  onJobDeleted = () => {},
+}) {
+  const isSimpleView = variant === "simple";
   const [health, setHealth] = useState(null);
   const [roots, setRoots] = useState([]);
   const [selectedRoots, setSelectedRoots] = useState(new Set());
   const [mode, setMode] = useState("both");
   const [newRootPath, setNewRootPath] = useState("");
+  const [simpleRootPath, setSimpleRootPath] = useState("/nas/photo");
 
   const [jobs, setJobs] = useState([]);
   const [jobsTotal, setJobsTotal] = useState(0);
@@ -210,6 +219,9 @@ export function DashboardPage({ activeJobId, recentJobIds, onSelectJob, onJobCre
     const sequence = calculateSequence(selectedIndex, jobsPage, JOB_PAGE_SIZE, jobsTotal, jobsOrder);
     return buildDisplayName(selectedJob, sequence);
   }, [jobStatus, jobs, jobsOrder, jobsPage, jobsTotal, selectedJobId]);
+
+  const simpleProgressPercent = calculateJobProgressPercent(jobStatus);
+  const simpleProgressStatus = jobStatus?.status || "idle";
 
   async function loadHealth() {
     try {
@@ -286,13 +298,19 @@ export function DashboardPage({ activeJobId, recentJobIds, onSelectJob, onJobCre
   }
 
   useEffect(() => {
+    if (isSimpleView) {
+      return;
+    }
     void loadHealth();
     void loadRoots();
-  }, []);
+  }, [isSimpleView]);
 
   useEffect(() => {
+    if (isSimpleView) {
+      return;
+    }
     void loadJobs();
-  }, [jobsPage, jobsStatusFilter, jobsModeFilter, jobsOrder]);
+  }, [isSimpleView, jobsPage, jobsStatusFilter, jobsModeFilter, jobsOrder]);
 
   useEffect(() => {
     setManualJobId(activeJobId || "");
@@ -457,6 +475,33 @@ export function DashboardPage({ activeJobId, recentJobIds, onSelectJob, onJobCre
     });
   }
 
+  async function resolveRootIdByPath(path) {
+    const normalizedPath = path.trim();
+    const availableRoots = await listScanRoots();
+    const existing = availableRoots.find((root) => root.path === normalizedPath);
+    if (existing) {
+      if (!existing.enabled) {
+        await updateScanRoot(existing.id, true);
+      }
+      return existing.id;
+    }
+
+    try {
+      const created = await createScanRoot(normalizedPath);
+      return created.id;
+    } catch (err) {
+      const parsed = parseApiError(err);
+      if (parsed.status === 409) {
+        const refreshed = await listScanRoots();
+        const conflicted = refreshed.find((root) => root.path === normalizedPath);
+        if (conflicted) {
+          return conflicted.id;
+        }
+      }
+      throw err;
+    }
+  }
+
   async function handleStartScan(event) {
     event.preventDefault();
     setSubmittingJob(true);
@@ -467,6 +512,28 @@ export function DashboardPage({ activeJobId, recentJobIds, onSelectJob, onJobCre
       setSelectedJobId(payload.job_id);
       setManualJobId(payload.job_id);
       await Promise.all([loadJob(payload.job_id), loadJobs({ showLoading: false })]);
+    } catch (err) {
+      const parsed = parseApiError(err);
+      setError(`Failed to start scan: ${parsed.detail}`);
+    } finally {
+      setSubmittingJob(false);
+    }
+  }
+
+  async function handleSimpleStartScan(event) {
+    event.preventDefault();
+    if (!simpleRootPath.trim()) {
+      return;
+    }
+
+    setSubmittingJob(true);
+    try {
+      const rootId = await resolveRootIdByPath(simpleRootPath.trim());
+      const payload = await createScanJob({ mode, root_ids: [rootId] });
+      onJobCreated(payload.job_id);
+      setSelectedJobId(payload.job_id);
+      setManualJobId(payload.job_id);
+      await loadJob(payload.job_id);
     } catch (err) {
       const parsed = parseApiError(err);
       setError(`Failed to start scan: ${parsed.detail}`);
@@ -553,6 +620,65 @@ export function DashboardPage({ activeJobId, recentJobIds, onSelectJob, onJobCre
     } finally {
       setDeletingJobId("");
     }
+  }
+
+  if (isSimpleView) {
+    return (
+      <div className="page-grid">
+        <ErrorBanner message={error} onDismiss={() => setError("")} />
+
+        <Panel
+          title="Simple Scan"
+          subtitle="Manual run by directory path: mode + start + progress only"
+        >
+          <form className="stack" onSubmit={handleSimpleStartScan}>
+            <label className="field">
+              <span>Directory path</span>
+              <input
+                type="text"
+                value={simpleRootPath}
+                placeholder="/nas/photo/family"
+                onChange={(event) => setSimpleRootPath(event.target.value)}
+              />
+            </label>
+
+            <label className="field">
+              <span>Scan mode</span>
+              <select value={mode} onChange={(event) => setMode(event.target.value)}>
+                {SCAN_MODES.map((scanMode) => (
+                  <option key={scanMode.value} value={scanMode.value}>
+                    {scanMode.label}
+                  </option>
+                ))}
+              </select>
+            </label>
+
+            <div className="inline-actions">
+              <button type="submit" className="button" disabled={submittingJob || !simpleRootPath.trim()}>
+                {submittingJob ? "Starting..." : "Start Scan"}
+              </button>
+              <span className="hint">No metadata deletion is performed in this screen.</span>
+            </div>
+
+            <div className="simple-progress-card" data-testid="simple-scan-progress">
+              <div className="simple-progress-card__header">
+                <span className="hint">Scan progress</span>
+                <StatusBadge value={simpleProgressStatus} />
+              </div>
+              <div className="jobs-progress">
+                <div className="jobs-progress__track">
+                  <div
+                    className={progressFillClass(simpleProgressStatus)}
+                    style={{ width: `${simpleProgressPercent}%` }}
+                  />
+                </div>
+                <span className="hint">{simpleProgressPercent}%</span>
+              </div>
+            </div>
+          </form>
+        </Panel>
+      </div>
+    );
   }
 
   return (

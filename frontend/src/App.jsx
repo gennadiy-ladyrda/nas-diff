@@ -66,8 +66,9 @@ export default function App() {
         </div>
         <nav className="nav">
           <NavLink to="/" end>
-            Dashboard
+            Advanced
           </NavLink>
+          <NavLink to="/scan">Simple Scan</NavLink>
           <NavLink to="/review">Review & Actions</NavLink>
         </nav>
       </header>
@@ -78,6 +79,20 @@ export default function App() {
             path="/"
             element={
               <DashboardPage
+                variant="advanced"
+                activeJobId={activeJobId}
+                recentJobIds={recentJobIds}
+                onSelectJob={selectJob}
+                onJobCreated={addRecentJob}
+                onJobDeleted={removeRecentJob}
+              />
+            }
+          />
+          <Route
+            path="/scan"
+            element={
+              <DashboardPage
+                variant="simple"
                 activeJobId={activeJobId}
                 recentJobIds={recentJobIds}
                 onSelectJob={selectJob}

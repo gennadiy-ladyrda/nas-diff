@@ -291,4 +291,70 @@ describe("DashboardPage", () => {
       expect.objectContaining({ method: "DELETE" }),
     );
   });
+
+  it("renders simple scan variant with directory input and compact progress", async () => {
+    const onJobCreated = vi.fn();
+    const onSelectJob = vi.fn();
+
+    const fetchMock = vi.fn(async (input, options = {}) => {
+      const url = String(input);
+      const method = (options.method || "GET").toUpperCase();
+
+      if (url.endsWith("/api/v1/scan/roots") && method === "GET") {
+        return jsonResponse([]);
+      }
+
+      if (url.endsWith("/api/v1/scan/roots") && method === "POST") {
+        return jsonResponse({ id: 41, path: "/nas/manual", enabled: true }, 201);
+      }
+
+      if (url.endsWith("/api/v1/scan/jobs") && method === "POST") {
+        return jsonResponse({ job_id: "simple-job-1", status: "queued", mode: "exact", root_ids: [41], queued: true }, 201);
+      }
+
+      if (url.endsWith("/api/v1/scan/jobs/simple-job-1") && method === "GET") {
+        return jsonResponse({
+          job_id: "simple-job-1",
+          mode: "exact",
+          status: "running",
+          requested_at: "2026-03-15T00:00:00",
+          started_at: "2026-03-15T00:00:01",
+          finished_at: null,
+          error_message: null,
+          files_seen: 10,
+          files_indexed: 4,
+          exact_groups_found: 0,
+          similar_groups_found: 0,
+          reclaimable_bytes: 0,
+        });
+      }
+
+      return jsonResponse({ detail: `Unhandled mock: ${method} ${url}` }, 404);
+    });
+
+    vi.stubGlobal("fetch", fetchMock);
+
+    render(
+      <DashboardPage
+        variant="simple"
+        activeJobId=""
+        recentJobIds={[]}
+        onSelectJob={onSelectJob}
+        onJobCreated={onJobCreated}
+      />,
+    );
+
+    expect(screen.queryByTestId("health-grid")).not.toBeInTheDocument();
+    expect(screen.queryByTestId("jobs-table")).not.toBeInTheDocument();
+    await screen.findByTestId("simple-scan-progress");
+
+    await userEvent.clear(screen.getByLabelText("Directory path"));
+    await userEvent.type(screen.getByLabelText("Directory path"), "/nas/manual");
+    await userEvent.click(screen.getByRole("button", { name: "Start Scan" }));
+
+    await waitFor(() => {
+      expect(onJobCreated).toHaveBeenCalledWith("simple-job-1");
+      expect(screen.getByTestId("simple-scan-progress")).toHaveTextContent("40%");
+    });
+  });
 });

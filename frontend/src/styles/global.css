@@ -279,6 +279,23 @@ select {
 .group-row {
   width: 100%;
   text-align: left;
+  cursor: pointer;
+}
+
+.group-row__meta {
+  display: grid;
+  gap: 4px;
+  justify-items: end;
+}
+
+.group-row__selector {
+  display: inline-flex;
+  gap: 6px;
+  align-items: center;
+}
+
+.group-row__selector input {
+  width: auto;
 }
 
 .group-row--active {
@@ -348,6 +365,21 @@ select {
   padding: 12px;
   display: grid;
   gap: 10px;
+}
+
+.simple-progress-card {
+  border: 1px solid var(--border);
+  border-radius: 12px;
+  background: rgba(255, 255, 255, 0.82);
+  padding: 10px 12px;
+  display: grid;
+  gap: 8px;
+}
+
+.simple-progress-card__header {
+  display: flex;
+  justify-content: space-between;
+  align-items: center;
 }
 
 .job-card__header {

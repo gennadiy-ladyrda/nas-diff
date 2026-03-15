@@ -6,6 +6,44 @@
 
 ## [Unreleased]
 
+## [2026-03-15] UX-SKETCH-01 - Simple Scan screen + Review bulk selection sketch
+
+### Added
+- Новый упрощенный экран сканирования:
+  - route `"/scan"` в `frontend/src/App.jsx`;
+  - `DashboardPage` в режиме `variant="simple"` показывает только:
+    - поле пути каталога;
+    - выбор режима сканирования;
+    - кнопку запуска;
+    - компактный progress-bar.
+- В `Review & Actions` добавлены элементы для массовой работы:
+  - выбор групп для batch (`select for batch`);
+  - команды `Select All Groups` / `Clear Selection`;
+  - новый scope `selected_groups`;
+  - блок `Batch decision for groups` для назначения одного решения всем non-primary файлам выбранных групп;
+  - блок `Apply one decision to selected files` для массового назначения одного решения выбранным файлам текущей группы.
+- Добавлен component-тест упрощенного режима dashboard:
+  - `frontend/tests/component/dashboard-page.test.jsx`.
+- Добавлены component-тесты массовых решений в `Review`:
+  - `frontend/tests/component/review-page.test.jsx`.
+
+### Changed
+- Навигация в topbar:
+  - `Advanced` (`/`),
+  - `Simple Scan` (`/scan`),
+  - `Review & Actions` (`/review`).
+- Схема preview/create в `ReviewPage` учитывает marker выбранных групп для `selected_groups`.
+- Стили `frontend/src/styles/global.css` расширены для:
+  - simple progress card;
+  - нового layout в списке групп (`group-row__meta`, `group-row__selector`).
+
+### Validation
+- `PYTHONPYCACHEPREFIX=/tmp/python-pycache python3 -m compileall backend/app backend/tests frontend/src`.
+- `docker compose config`.
+- Анализ runtime-логов `frontend/api`:
+  - подтвержден регулярный polling `GET /scan/jobs/{job_id}/groups?...` каждые ~5 сек при открытом `Review`.
+- Ограничение текущего sandbox: `node/npm` отсутствуют, поэтому `vitest/playwright` локально не запускались.
+
 ## [2026-03-15] QA-02 - Regression coverage for roots/jobs/bulk UX
 
 ### Added

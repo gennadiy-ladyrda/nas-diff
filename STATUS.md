@@ -5,7 +5,7 @@
 ## 1. Общий статус проекта
 - Текущая стадия: v1 baseline закрыт по backend, UI, QA и ops-документации.
 - Продуктовый режим безопасности: `move_to_trash` по умолчанию, `HARD_DELETE_ENABLED=false`.
-- Ближайший фокус: финальный smoke на целевом DSM6-окружении и release freeze v1.
+- Ближайший фокус: согласование UX-эскиза `Simple Scan + Review bulk selection`, затем финальный smoke и release freeze v1.
 
 ## 2. Прогресс по backlog
 | Task | Статус | Комментарий |
@@ -28,6 +28,7 @@
 | UI-04 | done | Добавлены jobs table (filters/sort/pagination), detail panel по клику и display-name `SCAN-<MODE>-<SEQ>`. |
 | ACT-02 | done | Реализованы bulk scopes (`selected/all_in_group/all_filtered`), preview endpoint и staged confirm для destructive flow. |
 | QA-02 | done | Добавлены регрессионные сценарии roots/jobs/bulk UX и обновлен единый regression runner для локальной воспроизводимости. |
+| UX-SKETCH-01 | in_review | Добавлен эскиз двух экранов dashboard (`advanced/simple`) и массовый UX выбора групп/решений в Review. |
 
 ## 3. Детали выполнения INFRA-01
 - Добавлен единый образ backend (`Python 3.11`, `FastAPI`, `RQ`, `Redis client`) для сервисов `api` и `worker`.
@@ -48,7 +49,7 @@
 - В рабочем каталоге может оставаться legacy-файл `data/nas_diff.db`; актуальный путь хранения БД перенесен в `~/.nas-diff/data`.
 
 ## 6. Следующий практический шаг
-- Выполнить финальный smoke на целевом DSM6-инстансе и зафиксировать release checklist v1.
+- Утвердить UX-эскиз (`/scan` + новый bulk UX в `Review`) и после согласования зафиксировать план упрощения внутренней scan-логики без job-журнала в UI.
 
 ## 7. Детали выполнения DB-01
 - Добавлен DB-layer на `SQLAlchemy 2.x`:
@@ -361,3 +362,33 @@
 - `docker compose config` -> ok.
 - `SKIP_FRONTEND=1 SKIP_PLAYWRIGHT=1 bash scripts/ci/run_s3_regression_suite.sh` -> ok (backend-only режим).
 - Ограничение окружения: `npm` отсутствует, поэтому frontend `vitest/playwright` в этом sandbox не запускались.
+
+## 36. Детали выполнения UX-SKETCH-01
+- Dashboard разделен на два экрана:
+  - `Advanced` (`/`) сохраняет текущий расширенный dashboard.
+  - `Simple Scan` (`/scan`) показывает только:
+    - ручной ввод каталога сканирования,
+    - выбор режима (`exact/similar/both`),
+    - запуск scan,
+    - компактный progress-bar.
+- Для `Simple Scan` добавлен безопасный flow запуска:
+  - путь резолвится в `scan_root` (используется существующий либо создается новый metadata-root),
+  - затем запускается scan job без удаления/перемещения файлов.
+- `Review & Actions` эскизно расширен под массовые операции:
+  - явные checkbox у групп (`select for batch`);
+  - быстрые команды `Select All Groups` / `Clear Selection`;
+  - новый bulk scope: `selected_groups`;
+  - новый блок `Batch decision for groups` для массового решения по всем выбранным группам;
+  - новый блок `Apply one decision to selected files` в `Group Details` для назначения одного решения множеству выбранных файлов.
+- По логам запущенного приложения подтверждено, что при открытом `Review` идет постоянный polling:
+  - `GET /api/v1/scan/jobs/{job_id}/groups?...` каждые ~5 секунд.
+  - Это объясняет ощущение постоянного обновления и стало входом для UX-эскиза более явного bulk-flow.
+
+## 37. Проверки по UX-SKETCH-01
+- `docker compose config` -> ok.
+- `PYTHONPYCACHEPREFIX=/tmp/python-pycache python3 -m compileall backend/app backend/tests frontend/src` -> ok.
+- Проверены runtime-логи:
+  - `docker compose logs --tail=120 frontend`
+  - `docker compose logs --tail=120 api`
+  - наблюдается регулярный polling `groups` endpoint из `Review`.
+- Ограничение окружения: `node/npm` отсутствуют в host sandbox, поэтому `vitest`/`playwright` локально не запускались.
