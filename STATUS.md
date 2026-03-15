@@ -430,3 +430,16 @@
 - `PYTHONPYCACHEPREFIX=/tmp/python-pycache python3 -m compileall backend/app backend/tests` -> ok.
 - `PYTHONPATH=. /tmp/nas-diff-venv/bin/python -m pytest -q backend/tests/api/test_act_01_actions.py backend/tests/api/test_api_03_scan_jobs_catalog.py` -> `15 passed`.
 - Ограничение текущего sandbox: `npm` отсутствует (`npm: command not found`), поэтому `vitest`/`playwright` локально не запускались.
+
+## 41. Hotfix latest-job preview zero-state
+- Исправлен `Simple Scan -> Preview Impact` для latest processed job без actionable duplicate-файлов:
+  - backend `POST /api/v1/actions/jobs/{job_id}/preview` теперь возвращает `200` с нулевыми `files_count/bytes`, а не `422`;
+  - frontend показывает zero-state сообщение и блокирует `Create Draft Batch (0)`.
+- Добавлены проверки:
+  - backend API test на zero-preview для пустого job;
+  - frontend component test на zero-state preview без error-banner.
+
+## 42. Проверки по hotfix latest-job preview zero-state
+- `PYTHONPYCACHEPREFIX=/tmp/python-pycache python3 -m compileall backend/app backend/tests` -> ok.
+- `PYTHONPATH=. /tmp/nas-diff-venv/bin/python -m pytest -q backend/tests/api/test_act_01_actions.py` -> `8 passed`.
+- Ограничение текущего sandbox: `npm` отсутствует (`npm: command not found`), поэтому frontend component tests локально не запускались.

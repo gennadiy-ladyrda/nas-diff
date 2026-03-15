@@ -712,6 +712,7 @@ export function DashboardPage({
       return;
     }
 
+    setError("");
     setSimplePreviewLoading(true);
     try {
       const payload = await previewScanJobActionBatch(latestProcessedJob.job_id, {
@@ -1023,12 +1024,17 @@ export function DashboardPage({
                     <div>{formatBytes(simpleActionPreview.estimated_reclaimable_bytes)}</div>
                   </div>
                 </div>
+                {simpleActionPreview.files_count === 0 ? (
+                  <p className="hint">
+                    Latest processed job has no non-primary duplicate files yet. Batch creation is unavailable.
+                  </p>
+                ) : null}
                 <div className="inline-actions">
                   <button
                     type="button"
                     className="button"
                     onClick={() => void handleCreateSimpleBatch()}
-                    disabled={submittingSimpleBatch}
+                    disabled={submittingSimpleBatch || simpleActionPreview.files_count === 0}
                   >
                     {submittingSimpleBatch
                       ? "Creating..."

@@ -572,4 +572,67 @@ describe("DashboardPage", () => {
 
     expect(confirmPayload).toEqual({ confirm_delete_permanent: false });
   });
+
+  it("shows zero-impact preview instead of error when latest processed job has no actionable files", async () => {
+    const fetchMock = vi.fn(async (input, options = {}) => {
+      const url = String(input);
+      const method = (options.method || "GET").toUpperCase();
+
+      if (url.endsWith("/api/v1/scan/jobs/latest/processed") && method === "GET") {
+        return jsonResponse({
+          job_id: "job-empty-action",
+          mode: "both",
+          status: "completed",
+          requested_at: "2026-03-15T12:00:00",
+          started_at: "2026-03-15T12:00:05",
+          finished_at: "2026-03-15T12:00:10",
+          error_message: null,
+          files_seen: 0,
+          files_indexed: 0,
+          exact_groups_found: 0,
+          similar_groups_found: 0,
+          reclaimable_bytes: 0,
+          roots: [{ id: 5, path: "/nas/photo/empty", enabled: true }],
+        });
+      }
+
+      if (url.endsWith("/api/v1/actions/jobs/job-empty-action/preview") && method === "POST") {
+        return jsonResponse({
+          job_id: "job-empty-action",
+          action_type: "move_to_trash",
+          file_ids: [],
+          files_count: 0,
+          total_bytes: 0,
+          estimated_reclaimable_bytes: 0,
+        });
+      }
+
+      return jsonResponse({ detail: `Unhandled mock: ${method} ${url}` }, 404);
+    });
+
+    vi.stubGlobal("fetch", fetchMock);
+
+    render(
+      <DashboardPage
+        variant="simple"
+        activeJobId=""
+        recentJobIds={[]}
+        onSelectJob={vi.fn()}
+        onJobCreated={vi.fn()}
+      />,
+    );
+
+    await screen.findByTestId("simple-defaults-card");
+    await userEvent.click(screen.getByRole("button", { name: "Preview Impact" }));
+
+    await waitFor(() => {
+      expect(screen.getByTestId("simple-action-preview")).toHaveTextContent("0 B");
+      expect(screen.getByTestId("simple-action-preview")).toHaveTextContent(
+        "Latest processed job has no non-primary duplicate files yet.",
+      );
+    });
+
+    expect(screen.queryByText(/Failed to preview last-job action:/)).not.toBeInTheDocument();
+    expect(screen.getByRole("button", { name: "Create Draft Batch (0)" })).toBeDisabled();
+  });
 });

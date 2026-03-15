@@ -159,6 +159,7 @@
 
 - `POST /api/v1/actions/jobs/{job_id}/preview`
 - Возвращает preview для всех distinct `non-primary` файлов exact/similar групп указанного job
+- Если в job нет actionable duplicate-файлов, endpoint возвращает `200` с нулевыми count/bytes, без ошибки
 
 - `POST /api/v1/actions/jobs/{job_id}/batches`
 - Создает draft batch для всех distinct `non-primary` файлов exact/similar групп указанного job

@@ -103,8 +103,17 @@ class ActionService:
         job_id: str,
         action_type: str,
     ) -> ActionBatchPreview:
-        file_ids = self.resolve_scan_job_file_ids(job_id=job_id)
-        return self.preview_batch(action_type=action_type, file_ids=file_ids)
+        normalized_action = _normalize_action_type(action_type)
+        file_ids = self._list_scan_job_file_ids(job_id=job_id)
+        if not file_ids:
+            return ActionBatchPreview(
+                action_type=normalized_action,
+                file_ids=[],
+                files_count=0,
+                total_bytes=0,
+                estimated_reclaimable_bytes=0,
+            )
+        return self.preview_batch(action_type=normalized_action, file_ids=file_ids)
 
     def create_scan_job_draft_batch(
         self,
@@ -264,6 +273,12 @@ class ActionService:
         return counters
 
     def resolve_scan_job_file_ids(self, *, job_id: str) -> list[int]:
+        file_ids = self._list_scan_job_file_ids(job_id=job_id)
+        if not file_ids:
+            raise ValueError(f"scan_job={job_id} has no actionable non-primary files")
+        return file_ids
+
+    def _list_scan_job_file_ids(self, *, job_id: str) -> list[int]:
         if self.session.get(ScanJob, job_id) is None:
             raise LookupError(f"scan_job={job_id} not found")
 
@@ -284,10 +299,7 @@ class ActionService:
             )
         ).all()
 
-        file_ids = sorted({int(file_id) for file_id in [*exact_ids, *similar_ids]})
-        if not file_ids:
-            raise ValueError(f"scan_job={job_id} has no actionable non-primary files")
-        return file_ids
+        return sorted({int(file_id) for file_id in [*exact_ids, *similar_ids]})
 
     def _build_items(self, *, action_type: str, file_ids: list[int]) -> list[ActionItemPayload]:
         files = self._load_files(file_ids)

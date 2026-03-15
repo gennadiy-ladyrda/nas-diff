@@ -6,6 +6,15 @@
 
 ## [Unreleased]
 
+### Changed
+- Hotfix latest-job preview zero-state:
+  - `POST /api/v1/actions/jobs/{job_id}/preview` теперь возвращает `200` с нулевым preview, если в job нет actionable `non-primary` duplicate-файлов;
+  - `Simple Scan` показывает zero-state вместо error-banner и блокирует создание draft batch при `files_count=0`.
+
+### Tests
+- Добавлен backend test zero-preview для empty latest-job action flow.
+- Добавлен frontend component test на zero-state `Preview Impact`.
+
 ## [2026-03-15] UI-05 + ACT-03 + UI-06 - Simple Scan defaults, last-job bulk action, hamburger navigation
 
 ### Added

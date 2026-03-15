@@ -476,3 +476,25 @@ def test_scan_job_action_batch_creates_draft_from_aggregated_file_scope(
     assert payload["stats"]["total"] == 1
     assert payload["items"][0]["file_id"] == file_id_b
     assert payload["summary"] == "scan_job=job-action-batch;scope=all_non_primary_groups"
+
+
+def test_scan_job_action_preview_returns_zero_payload_when_job_has_no_actionable_files(
+    api_client,
+    api_session_factory: sessionmaker[Session],
+) -> None:
+    with api_session_factory() as session:
+        _insert_scan_job(session, job_id="job-empty-preview")
+        session.commit()
+
+    preview_response = api_client.post(
+        "/api/v1/actions/jobs/job-empty-preview/preview",
+        json={"action_type": "move_to_trash"},
+    )
+    assert preview_response.status_code == 200
+    payload = preview_response.json()
+    assert payload["job_id"] == "job-empty-preview"
+    assert payload["action_type"] == "move_to_trash"
+    assert payload["file_ids"] == []
+    assert payload["files_count"] == 0
+    assert payload["total_bytes"] == 0
+    assert payload["estimated_reclaimable_bytes"] == 0
