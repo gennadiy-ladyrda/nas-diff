@@ -47,6 +47,13 @@ def _insert_root(session: Session, *, path: str = "/nas/photo") -> int:
     return int(root_id)
 
 
+def _attach_root_to_job(session: Session, *, job_id: str, root_id: int) -> None:
+    session.execute(
+        text("INSERT INTO scan_job_roots(job_id, root_id) VALUES (:job_id, :root_id)"),
+        {"job_id": job_id, "root_id": root_id},
+    )
+
+
 def test_list_scan_jobs_supports_filters_and_pagination(
     api_client,
     api_session_factory: sessionmaker[Session],
@@ -106,6 +113,47 @@ def test_list_scan_jobs_supports_filters_and_pagination(
     assert second_payload["total"] == 2
     assert len(second_payload["items"]) == 1
     assert second_payload["items"][0]["job_id"] == "job-old"
+
+
+def test_get_latest_processed_scan_job_skips_active_jobs_and_returns_roots(
+    api_client,
+    api_session_factory: sessionmaker[Session],
+) -> None:
+    with api_session_factory() as session:
+        older_root_id = _insert_root(session, path="/nas/photo/archive")
+        latest_root_id = _insert_root(session, path="/nas/photo/family")
+        _insert_scan_job(
+            session,
+            job_id="job-completed-old",
+            mode="exact",
+            status="completed",
+            requested_at="2026-03-13 10:00:00",
+        )
+        _insert_scan_job(
+            session,
+            job_id="job-running-new",
+            mode="both",
+            status="running",
+            requested_at="2026-03-13 11:00:00",
+        )
+        _insert_scan_job(
+            session,
+            job_id="job-failed-latest",
+            mode="similar",
+            status="failed",
+            requested_at="2026-03-13 12:00:00",
+        )
+        _attach_root_to_job(session, job_id="job-completed-old", root_id=older_root_id)
+        _attach_root_to_job(session, job_id="job-failed-latest", root_id=latest_root_id)
+        session.commit()
+
+    response = api_client.get("/api/v1/scan/jobs/latest/processed")
+    assert response.status_code == 200
+    payload = response.json()
+    assert payload["job_id"] == "job-failed-latest"
+    assert payload["mode"] == "similar"
+    assert payload["status"] == "failed"
+    assert payload["roots"] == [{"id": latest_root_id, "path": "/nas/photo/family", "enabled": True}]
 
 
 def test_delete_scan_job_removes_metadata_when_safe(

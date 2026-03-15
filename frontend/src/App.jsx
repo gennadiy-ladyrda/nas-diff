@@ -1,5 +1,5 @@
-import { useEffect, useMemo, useState } from "react";
-import { NavLink, Route, Routes } from "react-router-dom";
+import { useEffect, useMemo, useRef, useState } from "react";
+import { NavLink, Navigate, Route, Routes, useLocation } from "react-router-dom";
 
 import { DashboardPage } from "./pages/DashboardPage";
 import { ReviewPage } from "./pages/ReviewPage";
@@ -19,20 +19,62 @@ function readRecentJobs() {
   }
 }
 
+function routeLabel(pathname) {
+  if (pathname === "/advanced") {
+    return "Advanced";
+  }
+  if (pathname === "/review") {
+    return "Review & Actions";
+  }
+  return "Simple Scan";
+}
+
 export default function App() {
+  const location = useLocation();
   const [recentJobIds, setRecentJobIds] = useState(() => readRecentJobs());
   const [activeJobId, setActiveJobId] = useState(() => readRecentJobs()[0] || "");
+  const [isMenuOpen, setIsMenuOpen] = useState(false);
+  const menuRef = useRef(null);
 
   useEffect(() => {
     window.localStorage.setItem(JOB_STORAGE_KEY, JSON.stringify(recentJobIds));
   }, [recentJobIds]);
 
+  useEffect(() => {
+    setIsMenuOpen(false);
+  }, [location.pathname]);
+
+  useEffect(() => {
+    if (!isMenuOpen) {
+      return undefined;
+    }
+
+    function handlePointerDown(event) {
+      if (menuRef.current && !menuRef.current.contains(event.target)) {
+        setIsMenuOpen(false);
+      }
+    }
+
+    function handleKeyDown(event) {
+      if (event.key === "Escape") {
+        setIsMenuOpen(false);
+      }
+    }
+
+    document.addEventListener("pointerdown", handlePointerDown);
+    document.addEventListener("keydown", handleKeyDown);
+    return () => {
+      document.removeEventListener("pointerdown", handlePointerDown);
+      document.removeEventListener("keydown", handleKeyDown);
+    };
+  }, [isMenuOpen]);
+
   const summary = useMemo(() => {
     if (!activeJobId) {
-      return "No active scan job selected";
+      return `${routeLabel(location.pathname)} active`;
     }
-    return `Active job: ${activeJobId}`;
-  }, [activeJobId]);
+    return `${routeLabel(location.pathname)} · active job: ${activeJobId}`;
+  }, [activeJobId, location.pathname]);
 
   function addRecentJob(jobId) {
     setActiveJobId(jobId);
@@ -64,32 +106,39 @@ export default function App() {
           <h1>NAS Diff Control Plane</h1>
           <p>{summary}</p>
         </div>
-        <nav className="nav">
-          <NavLink to="/" end>
-            Advanced
-          </NavLink>
-          <NavLink to="/scan">Simple Scan</NavLink>
-          <NavLink to="/review">Review & Actions</NavLink>
-        </nav>
+        <div className="topbar__actions" ref={menuRef}>
+          <div className="topbar__current-route" aria-live="polite">
+            <span className="hint">Flow</span>
+            <strong>{routeLabel(location.pathname)}</strong>
+          </div>
+          <button
+            type="button"
+            className={`menu-toggle ${isMenuOpen ? "menu-toggle--open" : ""}`}
+            aria-label="Open navigation menu"
+            aria-expanded={isMenuOpen}
+            aria-controls="primary-navigation"
+            onClick={() => setIsMenuOpen((prev) => !prev)}
+          >
+            <span />
+            <span />
+            <span />
+          </button>
+          {isMenuOpen ? (
+            <nav id="primary-navigation" className="menu-popover" aria-label="Primary">
+              <NavLink to="/" end>
+                Simple Scan
+              </NavLink>
+              <NavLink to="/advanced">Advanced</NavLink>
+              <NavLink to="/review">Review & Actions</NavLink>
+            </nav>
+          ) : null}
+        </div>
       </header>
 
       <main className="content">
         <Routes>
           <Route
             path="/"
-            element={
-              <DashboardPage
-                variant="advanced"
-                activeJobId={activeJobId}
-                recentJobIds={recentJobIds}
-                onSelectJob={selectJob}
-                onJobCreated={addRecentJob}
-                onJobDeleted={removeRecentJob}
-              />
-            }
-          />
-          <Route
-            path="/scan"
             element={
               <DashboardPage
                 variant="simple"
@@ -101,6 +150,20 @@ export default function App() {
               />
             }
           />
+          <Route
+            path="/advanced"
+            element={
+              <DashboardPage
+                variant="advanced"
+                activeJobId={activeJobId}
+                recentJobIds={recentJobIds}
+                onSelectJob={selectJob}
+                onJobCreated={addRecentJob}
+                onJobDeleted={removeRecentJob}
+              />
+            }
+          />
+          <Route path="/scan" element={<Navigate to="/" replace />} />
           <Route
             path="/review"
             element={<ReviewPage activeJobId={activeJobId} recentJobIds={recentJobIds} onSelectJob={selectJob} />}

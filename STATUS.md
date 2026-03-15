@@ -5,7 +5,7 @@
 ## 1. Общий статус проекта
 - Текущая стадия: v1 baseline закрыт по backend, UI, QA и ops-документации.
 - Продуктовый режим безопасности: `move_to_trash` по умолчанию, `HARD_DELETE_ENABLED=false`.
-- Ближайший фокус: согласование UX-эскиза `Simple Scan + Review bulk selection`, затем финальный smoke и release freeze v1.
+- Ближайший фокус: финальный smoke для `Simple Scan` primary flow, затем release freeze v1.
 
 ## 2. Прогресс по backlog
 | Task | Статус | Комментарий |
@@ -29,6 +29,9 @@
 | ACT-02 | done | Реализованы bulk scopes (`selected/all_in_group/all_filtered`), preview endpoint и staged confirm для destructive flow. |
 | QA-02 | done | Добавлены регрессионные сценарии roots/jobs/bulk UX и обновлен единый regression runner для локальной воспроизводимости. |
 | UX-SKETCH-01 | in_review | Добавлен эскиз двух экранов dashboard (`advanced/simple`) и массовый UX выбора групп/решений в Review. |
+| UI-05 | done | `Simple Scan` автоподставляет path/mode из последнего processed job с fallback в localStorage/default. |
+| ACT-03 | done | Добавлен simple action flow `preview -> draft -> confirm` по всем distinct non-primary файлам последнего job. |
+| UI-06 | done | Стартовый маршрут переключен на `Simple Scan`, `Advanced`/`Review` перенесены в hamburger-menu. |
 
 ## 3. Детали выполнения INFRA-01
 - Добавлен единый образ backend (`Python 3.11`, `FastAPI`, `RQ`, `Redis client`) для сервисов `api` и `worker`.
@@ -49,7 +52,7 @@
 - В рабочем каталоге может оставаться legacy-файл `data/nas_diff.db`; актуальный путь хранения БД перенесен в `~/.nas-diff/data`.
 
 ## 6. Следующий практический шаг
-- Утвердить UX-эскиз (`/scan` + новый bulk UX в `Review`) и после согласования зафиксировать план упрощения внутренней scan-логики без job-журнала в UI.
+- Прогнать полный frontend smoke (`vitest`/browser/e2e) в окружении с `node/npm` и зафиксировать release-candidate UX.
 
 ## 7. Детали выполнения DB-01
 - Добавлен DB-layer на `SQLAlchemy 2.x`:
@@ -392,3 +395,38 @@
   - `docker compose logs --tail=120 api`
   - наблюдается регулярный polling `groups` endpoint из `Review`.
 - Ограничение окружения: `node/npm` отсутствуют в host sandbox, поэтому `vitest`/`playwright` локально не запускались.
+
+## 38. Детали планирования TASKS-03 (UI-05 / ACT-03 / UI-06)
+- Добавлены новые task-brief файлы:
+  - `tasks/UI-05.md` — автоподстановка последнего `path/mode` в `Simple Scan`.
+  - `tasks/ACT-03.md` — единое action-действие по всем релевантным файлам последнего job из `Simple Scan`.
+  - `tasks/UI-06.md` — hamburger-навигация и default route на `Simple Scan`.
+- Обновлен `tasks/README.md`:
+  - добавлены пункты `19..21`,
+  - новые файлы включены в секцию `Файлы задач`.
+- Реализация задач не выполнялась (только описание и постановка).
+
+## 39. Детали выполнения UI-05 / ACT-03 / UI-06
+- `Simple Scan` обновлен до primary flow:
+  - при загрузке вызывает `GET /api/v1/scan/jobs/latest/processed`;
+  - подставляет `Directory path` и `Scan mode` из последнего обработанного job;
+  - при отсутствии processed history использует `localStorage` fallback или дефолт `/nas/photo` + `both`;
+  - после успешного запуска scan обновляет локально сохраненные значения.
+- Для массового действия в `Simple Scan` добавлен backend-driven flow:
+  - `POST /api/v1/actions/jobs/{job_id}/preview`;
+  - `POST /api/v1/actions/jobs/{job_id}/batches`;
+  - policy: в batch попадают все distinct `non-primary` файлы exact/similar групп указанного job.
+- Навигация приложения переработана:
+  - маршрут `/` теперь открывает `Simple Scan`;
+  - `Advanced` перенесен на `/advanced`;
+  - `/scan` оставлен как alias на `/`;
+  - `Advanced` и `Review & Actions` доступны через hamburger-меню с close по outside-click и `Esc`.
+- Добавлены тесты:
+  - backend API для latest processed job и job-scoped action aggregation;
+  - frontend component tests для `Simple Scan` defaults/action flow;
+  - frontend component test для hamburger-navigation и default routing.
+
+## 40. Проверки по UI-05 / ACT-03 / UI-06
+- `PYTHONPYCACHEPREFIX=/tmp/python-pycache python3 -m compileall backend/app backend/tests` -> ok.
+- `PYTHONPATH=. /tmp/nas-diff-venv/bin/python -m pytest -q backend/tests/api/test_act_01_actions.py backend/tests/api/test_api_03_scan_jobs_catalog.py` -> `15 passed`.
+- Ограничение текущего sandbox: `npm` отсутствует (`npm: command not found`), поэтому `vitest`/`playwright` локально не запускались.

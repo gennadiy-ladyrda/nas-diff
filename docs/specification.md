@@ -29,6 +29,8 @@
 ### FR-2: Запуск сканирования
 - Создание `scan_job` с режимом `exact|similar|both`.
 - Отображение прогресса и статуса.
+- `Simple Scan` использует последний обработанный job для автоподстановки пути и режима.
+- При отсутствии истории `Simple Scan` использует локальный fallback (`localStorage`) или дефолт `/nas/photo` + `both`.
 
 ### FR-3: Exact поиск
 - Детектирование 100% одинаковых файлов по `blake3_full`.
@@ -68,6 +70,11 @@
 - Перед confirm обязателен preview последствий (count/bytes/action).
 - Для `delete_permanent` требуется усиленный confirm-step.
 - Для `move_to_trash` доступен rollback-сценарий после исполнения.
+
+### FR-11: Primary navigation и Simple Scan flow
+- Маршрут по умолчанию (`/`) открывает `Simple Scan`.
+- Доступ к `Advanced` и `Review & Actions` выполняется через hamburger-меню.
+- Меню поддерживает активный маршрут, закрытие по клику вне области и по `Esc`.
 
 ## 5. Нефункциональные требования
 ### NFR-1: Совместимость
@@ -129,6 +136,9 @@
 - `GET /api/v1/scan/jobs/{job_id}`
 - Ответ: прогресс и метрики
 
+- `GET /api/v1/scan/jobs/latest/processed`
+- Ответ: последний обработанный job (`status != queued|running`) с attached roots для `Simple Scan`
+
 - `DELETE /api/v1/scan/jobs/{job_id}`
 - Удаление job-метаданных (safe-first; без воздействия на NAS-файлы)
 - Для stale `running/queued` jobs поддерживается `allow_stale_running=true` (иначе `409`)
@@ -146,6 +156,12 @@
 ### Actions
 - `POST /api/v1/actions/batches/preview`
 - Возвращает последствия массовой операции до confirm (`files_count`, `total_bytes`, `estimated_reclaimable_bytes`)
+
+- `POST /api/v1/actions/jobs/{job_id}/preview`
+- Возвращает preview для всех distinct `non-primary` файлов exact/similar групп указанного job
+
+- `POST /api/v1/actions/jobs/{job_id}/batches`
+- Создает draft batch для всех distinct `non-primary` файлов exact/similar групп указанного job
 
 - `POST /api/v1/actions/batches`
 - Создает draft batch

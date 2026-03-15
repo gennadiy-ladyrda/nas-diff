@@ -44,6 +44,28 @@ def _insert_root_and_file(
     return int(file_id)
 
 
+def _insert_scan_job(session: Session, *, job_id: str, mode: str = "both", status: str = "completed") -> None:
+    session.execute(
+        text(
+            """
+            INSERT INTO scan_jobs(
+                id, mode, status, requested_at,
+                files_seen, files_indexed, exact_groups_found, similar_groups_found, reclaimable_bytes
+            )
+            VALUES (
+                :job_id, :mode, :status, '2026-03-15 10:00:00',
+                0, 0, 0, 0, 0
+            )
+            """
+        ),
+        {
+            "job_id": job_id,
+            "mode": mode,
+            "status": status,
+        },
+    )
+
+
 def test_actions_move_to_trash_and_rollback_flow(
     api_client,
     api_session_factory: sessionmaker[Session],
@@ -280,3 +302,177 @@ def test_actions_preview_restore_requires_unrestored_movements(
     )
     assert preview_response.status_code == 404
     assert "no unrestored movement found" in preview_response.json()["detail"]
+
+
+def test_scan_job_action_preview_aggregates_non_primary_files_across_group_kinds(
+    api_client,
+    api_session_factory: sessionmaker[Session],
+    tmp_path,
+) -> None:
+    dataset_root = tmp_path / "actions-job-preview"
+    root_a = dataset_root / "root-a"
+    root_b = dataset_root / "root-b"
+    root_c = dataset_root / "root-c"
+    root_a.mkdir(parents=True, exist_ok=True)
+    root_b.mkdir(parents=True, exist_ok=True)
+    root_c.mkdir(parents=True, exist_ok=True)
+    file_a = root_a / "a.jpg"
+    file_b = root_b / "b.jpg"
+    file_c = root_c / "c.jpg"
+    file_a.write_bytes(b"A" * 100)
+    file_b.write_bytes(b"B" * 200)
+    file_c.write_bytes(b"C" * 300)
+
+    with api_session_factory() as session:
+        _insert_scan_job(session, job_id="job-action-source")
+        file_id_a = _insert_root_and_file(
+            session,
+            root_path=str(root_a),
+            file_abs_path=str(file_a),
+            rel_path="a.jpg",
+            size_bytes=100,
+        )
+        file_id_b = _insert_root_and_file(
+            session,
+            root_path=str(root_b),
+            file_abs_path=str(file_b),
+            rel_path="b.jpg",
+            size_bytes=200,
+        )
+        file_id_c = _insert_root_and_file(
+            session,
+            root_path=str(root_c),
+            file_abs_path=str(file_c),
+            rel_path="c.jpg",
+            size_bytes=300,
+        )
+
+        exact_group_id = session.execute(
+            text(
+                """
+                INSERT INTO exact_groups(job_id, signature, file_count, total_bytes, reclaimable_bytes)
+                VALUES ('job-action-source', 'sig-1', 2, 300, 200)
+                """
+            )
+        ).lastrowid
+        similar_group_id = session.execute(
+            text(
+                """
+                INSERT INTO similar_groups(job_id, algorithm, threshold, file_count)
+                VALUES ('job-action-source', 'phash64', 8, 2)
+                """
+            )
+        ).lastrowid
+        assert exact_group_id is not None
+        assert similar_group_id is not None
+
+        session.execute(
+            text(
+                """
+                INSERT INTO exact_group_items(group_id, file_id, is_primary)
+                VALUES (:group_id, :file_primary, 1), (:group_id, :file_secondary, 0)
+                """
+            ),
+            {
+                "group_id": int(exact_group_id),
+                "file_primary": file_id_a,
+                "file_secondary": file_id_b,
+            },
+        )
+        session.execute(
+            text(
+                """
+                INSERT INTO similar_group_items(group_id, file_id, distance_to_anchor, is_primary)
+                VALUES
+                    (:group_id, :file_existing_secondary, 0, 0),
+                    (:group_id, :file_new_secondary, 4, 0)
+                """
+            ),
+            {
+                "group_id": int(similar_group_id),
+                "file_existing_secondary": file_id_b,
+                "file_new_secondary": file_id_c,
+            },
+        )
+        session.commit()
+
+    preview_response = api_client.post(
+        "/api/v1/actions/jobs/job-action-source/preview",
+        json={"action_type": "move_to_trash"},
+    )
+    assert preview_response.status_code == 200
+    payload = preview_response.json()
+    assert payload["job_id"] == "job-action-source"
+    assert payload["file_ids"] == [file_id_b, file_id_c]
+    assert payload["files_count"] == 2
+    assert payload["total_bytes"] == 500
+    assert payload["estimated_reclaimable_bytes"] == 500
+
+
+def test_scan_job_action_batch_creates_draft_from_aggregated_file_scope(
+    api_client,
+    api_session_factory: sessionmaker[Session],
+    tmp_path,
+) -> None:
+    dataset_root = tmp_path / "actions-job-batch"
+    root_a = dataset_root / "root-a"
+    root_b = dataset_root / "root-b"
+    root_a.mkdir(parents=True, exist_ok=True)
+    root_b.mkdir(parents=True, exist_ok=True)
+    file_a = root_a / "dup-a.jpg"
+    file_b = root_b / "dup-b.jpg"
+    file_a.write_bytes(b"A" * 64)
+    file_b.write_bytes(b"B" * 96)
+
+    with api_session_factory() as session:
+        _insert_scan_job(session, job_id="job-action-batch")
+        file_id_a = _insert_root_and_file(
+            session,
+            root_path=str(root_a),
+            file_abs_path=str(file_a),
+            rel_path="dup-a.jpg",
+            size_bytes=64,
+        )
+        file_id_b = _insert_root_and_file(
+            session,
+            root_path=str(root_b),
+            file_abs_path=str(file_b),
+            rel_path="dup-b.jpg",
+            size_bytes=96,
+        )
+
+        exact_group_id = session.execute(
+            text(
+                """
+                INSERT INTO exact_groups(job_id, signature, file_count, total_bytes, reclaimable_bytes)
+                VALUES ('job-action-batch', 'sig-2', 2, 160, 96)
+                """
+            )
+        ).lastrowid
+        assert exact_group_id is not None
+        session.execute(
+            text(
+                """
+                INSERT INTO exact_group_items(group_id, file_id, is_primary)
+                VALUES (:group_id, :file_primary, 1), (:group_id, :file_secondary, 0)
+                """
+            ),
+            {
+                "group_id": int(exact_group_id),
+                "file_primary": file_id_a,
+                "file_secondary": file_id_b,
+            },
+        )
+        session.commit()
+
+    create_response = api_client.post(
+        "/api/v1/actions/jobs/job-action-batch/batches",
+        json={"action_type": "move_to_trash"},
+    )
+    assert create_response.status_code == 201
+    payload = create_response.json()
+    assert payload["action_type"] == "move_to_trash"
+    assert payload["status"] == "draft"
+    assert payload["stats"]["total"] == 1
+    assert payload["items"][0]["file_id"] == file_id_b
+    assert payload["summary"] == "scan_job=job-action-batch;scope=all_non_primary_groups"

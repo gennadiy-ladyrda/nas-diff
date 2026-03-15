@@ -13,6 +13,7 @@ function jsonResponse(data, status = 200) {
 
 afterEach(() => {
   vi.unstubAllGlobals();
+  window.localStorage.clear();
 });
 
 describe("DashboardPage", () => {
@@ -300,6 +301,10 @@ describe("DashboardPage", () => {
       const url = String(input);
       const method = (options.method || "GET").toUpperCase();
 
+      if (url.endsWith("/api/v1/scan/jobs/latest/processed") && method === "GET") {
+        return jsonResponse({ detail: "no processed scan jobs found" }, 404);
+      }
+
       if (url.endsWith("/api/v1/scan/roots") && method === "GET") {
         return jsonResponse([]);
       }
@@ -326,6 +331,7 @@ describe("DashboardPage", () => {
           exact_groups_found: 0,
           similar_groups_found: 0,
           reclaimable_bytes: 0,
+          roots: [{ id: 41, path: "/nas/manual", enabled: true }],
         });
       }
 
@@ -356,5 +362,214 @@ describe("DashboardPage", () => {
       expect(onJobCreated).toHaveBeenCalledWith("simple-job-1");
       expect(screen.getByTestId("simple-scan-progress")).toHaveTextContent("40%");
     });
+
+    expect(JSON.parse(window.localStorage.getItem("nas-diff.simple-scan-defaults"))).toEqual({
+      path: "/nas/manual",
+      mode: "both",
+    });
+  });
+
+  it("auto-fills simple scan from the latest processed job", async () => {
+    const fetchMock = vi.fn(async (input, options = {}) => {
+      const url = String(input);
+      const method = (options.method || "GET").toUpperCase();
+
+      if (url.endsWith("/api/v1/scan/jobs/latest/processed") && method === "GET") {
+        return jsonResponse({
+          job_id: "job-latest",
+          mode: "similar",
+          status: "completed",
+          requested_at: "2026-03-15T10:00:00",
+          started_at: "2026-03-15T10:00:05",
+          finished_at: "2026-03-15T10:01:05",
+          error_message: null,
+          files_seen: 12,
+          files_indexed: 12,
+          exact_groups_found: 1,
+          similar_groups_found: 2,
+          reclaimable_bytes: 2048,
+          roots: [
+            { id: 8, path: "/nas/photo/auto", enabled: true },
+            { id: 9, path: "/nas/photo/other", enabled: true },
+          ],
+        });
+      }
+
+      return jsonResponse({ detail: `Unhandled mock: ${method} ${url}` }, 404);
+    });
+
+    vi.stubGlobal("fetch", fetchMock);
+
+    render(
+      <DashboardPage
+        variant="simple"
+        activeJobId=""
+        recentJobIds={[]}
+        onSelectJob={vi.fn()}
+        onJobCreated={vi.fn()}
+      />,
+    );
+
+    await waitFor(() => {
+      expect(screen.getByLabelText("Directory path")).toHaveValue("/nas/photo/auto");
+      expect(screen.getByLabelText("Scan mode")).toHaveValue("similar");
+    });
+
+    expect(screen.getByTestId("simple-defaults-card")).toHaveTextContent("Source: latest processed job");
+    expect(screen.getByTestId("simple-defaults-card")).toHaveTextContent(
+      "Auto-selected the first root from 2 roots of the latest processed job.",
+    );
+    expect(screen.getByTestId("simple-defaults-card")).toHaveTextContent("SCAN-SIMILAR-JOB-LATE");
+  });
+
+  it("falls back to local simple scan defaults when there is no processed job history", async () => {
+    window.localStorage.setItem(
+      "nas-diff.simple-scan-defaults",
+      JSON.stringify({ path: "/nas/photo/fallback", mode: "exact" }),
+    );
+
+    const fetchMock = vi.fn(async (input, options = {}) => {
+      const url = String(input);
+      const method = (options.method || "GET").toUpperCase();
+
+      if (url.endsWith("/api/v1/scan/jobs/latest/processed") && method === "GET") {
+        return jsonResponse({ detail: "no processed scan jobs found" }, 404);
+      }
+
+      return jsonResponse({ detail: `Unhandled mock: ${method} ${url}` }, 404);
+    });
+
+    vi.stubGlobal("fetch", fetchMock);
+
+    render(
+      <DashboardPage
+        variant="simple"
+        activeJobId=""
+        recentJobIds={[]}
+        onSelectJob={vi.fn()}
+        onJobCreated={vi.fn()}
+      />,
+    );
+
+    await waitFor(() => {
+      expect(screen.getByLabelText("Directory path")).toHaveValue("/nas/photo/fallback");
+      expect(screen.getByLabelText("Scan mode")).toHaveValue("exact");
+    });
+
+    expect(screen.getByTestId("simple-defaults-card")).toHaveTextContent("Source: local fallback");
+  });
+
+  it("runs preview, draft, and confirm flow for the latest processed job action", async () => {
+    let confirmPayload = null;
+
+    const fetchMock = vi.fn(async (input, options = {}) => {
+      const url = String(input);
+      const method = (options.method || "GET").toUpperCase();
+
+      if (url.endsWith("/api/v1/scan/jobs/latest/processed") && method === "GET") {
+        return jsonResponse({
+          job_id: "job-latest-action",
+          mode: "both",
+          status: "completed",
+          requested_at: "2026-03-15T10:00:00",
+          started_at: "2026-03-15T10:00:05",
+          finished_at: "2026-03-15T10:01:05",
+          error_message: null,
+          files_seen: 20,
+          files_indexed: 20,
+          exact_groups_found: 2,
+          similar_groups_found: 1,
+          reclaimable_bytes: 4096,
+          roots: [{ id: 5, path: "/nas/photo/auto", enabled: true }],
+        });
+      }
+
+      if (url.endsWith("/api/v1/actions/jobs/job-latest-action/preview") && method === "POST") {
+        return jsonResponse({
+          job_id: "job-latest-action",
+          action_type: "move_to_trash",
+          file_ids: [11, 12],
+          files_count: 2,
+          total_bytes: 3072,
+          estimated_reclaimable_bytes: 3072,
+        });
+      }
+
+      if (url.endsWith("/api/v1/actions/jobs/job-latest-action/batches") && method === "POST") {
+        return jsonResponse(
+          {
+            batch_id: "simple-batch-1",
+            status: "draft",
+            action_type: "move_to_trash",
+            requested_at: "2026-03-15T10:05:00",
+            confirmed_at: null,
+            executed_at: null,
+            requested_by: "local_admin",
+            dry_run: false,
+            summary: "scan_job=job-latest-action;scope=all_non_primary_groups",
+            stats: { total: 2, pending: 2, done: 0, failed: 0, skipped: 0 },
+            items: [
+              { id: 1, file_id: 11, source_path: "/nas/photo/1.jpg", target_path: "/trash/1.jpg", status: "pending" },
+              { id: 2, file_id: 12, source_path: "/nas/photo/2.jpg", target_path: "/trash/2.jpg", status: "pending" },
+            ],
+          },
+          201,
+        );
+      }
+
+      if (url.endsWith("/api/v1/actions/batches/simple-batch-1/confirm") && method === "POST") {
+        confirmPayload = JSON.parse(options.body);
+        return jsonResponse({ batch_id: "simple-batch-1", status: "confirmed", queued: true });
+      }
+
+      if (url.endsWith("/api/v1/actions/batches/simple-batch-1") && method === "GET") {
+        return jsonResponse({
+          batch_id: "simple-batch-1",
+          status: "executed",
+          action_type: "move_to_trash",
+          requested_at: "2026-03-15T10:05:00",
+          confirmed_at: "2026-03-15T10:05:30",
+          executed_at: "2026-03-15T10:05:50",
+          requested_by: "local_admin",
+          dry_run: false,
+          summary: "scan_job=job-latest-action;scope=all_non_primary_groups",
+          stats: { total: 2, pending: 0, done: 2, failed: 0, skipped: 0 },
+          items: [
+            { id: 1, file_id: 11, source_path: "/nas/photo/1.jpg", target_path: "/trash/1.jpg", status: "done" },
+            { id: 2, file_id: 12, source_path: "/nas/photo/2.jpg", target_path: "/trash/2.jpg", status: "done" },
+          ],
+        });
+      }
+
+      return jsonResponse({ detail: `Unhandled mock: ${method} ${url}` }, 404);
+    });
+
+    vi.stubGlobal("fetch", fetchMock);
+
+    render(
+      <DashboardPage
+        variant="simple"
+        activeJobId=""
+        recentJobIds={[]}
+        onSelectJob={vi.fn()}
+        onJobCreated={vi.fn()}
+      />,
+    );
+
+    await screen.findByTestId("simple-defaults-card");
+    await userEvent.click(screen.getByRole("button", { name: "Preview Impact" }));
+    await screen.findByTestId("simple-action-preview");
+
+    await userEvent.click(screen.getByRole("button", { name: "Create Draft Batch (2)" }));
+    await screen.findByTestId("simple-action-batch");
+
+    await userEvent.click(screen.getByRole("button", { name: "Confirm Batch" }));
+
+    await waitFor(() => {
+      expect(screen.getByTestId("simple-action-batch")).toHaveTextContent("executed");
+      expect(screen.getByTestId("simple-action-batch")).toHaveTextContent("2");
+    });
+
+    expect(confirmPayload).toEqual({ confirm_delete_permanent: false });
   });
 });

@@ -21,6 +21,9 @@
 16. `UI-04` - Таблица jobs, status-row и человекочитаемые имена
 17. `ACT-02` - Групповые операции над файлами (safe-by-default)
 18. `QA-02` - Регрессия для roots/jobs/bulk UX
+19. `UI-05` - Simple Scan: автоподстановка последнего каталога и режима
+20. `ACT-03` - Simple Scan: одно действие по всем файлам последнего job
+21. `UI-06` - Навигация через hamburger и старт с Simple Scan
 
 ## Файлы задач
 - `tasks/INFRA-01.md`
@@ -41,3 +44,6 @@
 - `tasks/UI-04.md`
 - `tasks/ACT-02.md`
 - `tasks/QA-02.md`
+- `tasks/UI-05.md`
+- `tasks/ACT-03.md`
+- `tasks/UI-06.md`

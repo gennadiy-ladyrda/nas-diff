@@ -51,6 +51,15 @@ class ScanJobRepository:
         stmt = select(ScanJob).order_by(ScanJob.requested_at.desc()).limit(limit)
         return list(self.session.scalars(stmt))
 
+    def get_latest_processed(self) -> ScanJob | None:
+        stmt = (
+            select(ScanJob)
+            .where(ScanJob.status.not_in(("queued", "running")))
+            .order_by(ScanJob.requested_at.desc(), ScanJob.id.desc())
+            .limit(1)
+        )
+        return self.session.scalar(stmt)
+
     def list_jobs(
         self,
         *,

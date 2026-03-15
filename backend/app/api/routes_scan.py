@@ -180,6 +180,15 @@ def list_scan_jobs(
     )
 
 
+@router.get("/jobs/latest/processed", response_model=ScanJobStatusResponse)
+def get_latest_processed_scan_job(db: Session = Depends(get_db_session)) -> ScanJobStatusResponse:
+    job_repo = ScanJobRepository(db)
+    job = job_repo.get_latest_processed()
+    if job is None:
+        raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="no processed scan jobs found")
+    return _serialize_scan_job_status(db, job)
+
+
 @router.get("/jobs/{job_id}", response_model=ScanJobStatusResponse)
 def get_scan_job_status(job_id: str, db: Session = Depends(get_db_session)) -> ScanJobStatusResponse:
     job_repo = ScanJobRepository(db)
@@ -187,10 +196,14 @@ def get_scan_job_status(job_id: str, db: Session = Depends(get_db_session)) -> S
     if job is None:
         raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail=f"scan_job={job_id} not found")
 
+    return _serialize_scan_job_status(db, job)
+
+
+def _serialize_scan_job_status(db: Session, job) -> ScanJobStatusResponse:
     roots_rows = db.execute(
         select(ScanRoot.id, ScanRoot.path, ScanRoot.enabled)
         .join(ScanJobRoot, ScanJobRoot.root_id == ScanRoot.id)
-        .where(ScanJobRoot.job_id == job_id)
+        .where(ScanJobRoot.job_id == job.id)
         .order_by(ScanRoot.id.asc())
     ).all()
 

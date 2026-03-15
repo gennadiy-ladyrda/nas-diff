@@ -1,14 +1,19 @@
 import { useEffect, useMemo, useRef, useState } from "react";
 
 import {
+  confirmActionBatch,
+  createScanJobActionBatch,
   createScanJob,
   createScanRoot,
   deleteScanJob,
   deleteScanRoot,
+  getActionBatch,
   getHealth,
+  getLatestProcessedScanJob,
   getScanJob,
   listScanJobs,
   listScanRoots,
+  previewScanJobActionBatch,
   updateScanRoot,
 } from "../api/client";
 import { ErrorBanner } from "../components/ErrorBanner";
@@ -26,6 +31,37 @@ const SCAN_MODES = [
 const JOB_STATUS_FILTERS = ["all", "queued", "running", "completed", "failed", "canceled"];
 const JOB_MODE_FILTERS = ["all", "exact", "similar", "both"];
 const JOB_PAGE_SIZE = 20;
+const SIMPLE_SCAN_STORAGE_KEY = "nas-diff.simple-scan-defaults";
+const SIMPLE_SCAN_ACTIONS = [
+  { value: "move_to_trash", label: "move_to_trash" },
+  { value: "delete_permanent", label: "delete_permanent" },
+];
+
+function readSimpleScanDefaults() {
+  try {
+    const raw = window.localStorage.getItem(SIMPLE_SCAN_STORAGE_KEY);
+    if (!raw) {
+      return { path: "/nas/photo", mode: "both" };
+    }
+    const parsed = JSON.parse(raw);
+    return {
+      path: typeof parsed?.path === "string" && parsed.path.trim() ? parsed.path : "/nas/photo",
+      mode: typeof parsed?.mode === "string" && SCAN_MODES.some((item) => item.value === parsed.mode) ? parsed.mode : "both",
+    };
+  } catch {
+    return { path: "/nas/photo", mode: "both" };
+  }
+}
+
+function persistSimpleScanDefaults(path, mode) {
+  window.localStorage.setItem(
+    SIMPLE_SCAN_STORAGE_KEY,
+    JSON.stringify({
+      path,
+      mode,
+    }),
+  );
+}
 
 function parseApiError(err) {
   const raw = err instanceof Error ? err.message : String(err);
@@ -63,6 +99,14 @@ function calculateSequence(index, page, pageSize, total, order) {
 
 function isActiveJobStatus(status) {
   return status === "queued" || status === "running";
+}
+
+function resolveAutoRoot(job) {
+  const orderedRoots = [...(job?.roots || [])].sort((left, right) => left.id - right.id);
+  return {
+    selectedRoot: orderedRoots[0] || null,
+    rootsCount: orderedRoots.length,
+  };
 }
 
 function calculateJobProgressPercent(job) {
@@ -174,12 +218,22 @@ export function DashboardPage({
   onJobDeleted = () => {},
 }) {
   const isSimpleView = variant === "simple";
+  const initialSimpleDefaults = readSimpleScanDefaults();
   const [health, setHealth] = useState(null);
   const [roots, setRoots] = useState([]);
   const [selectedRoots, setSelectedRoots] = useState(new Set());
   const [mode, setMode] = useState("both");
   const [newRootPath, setNewRootPath] = useState("");
-  const [simpleRootPath, setSimpleRootPath] = useState("/nas/photo");
+  const [simpleRootPath, setSimpleRootPath] = useState(initialSimpleDefaults.path);
+  const [simpleDefaultsSource, setSimpleDefaultsSource] = useState("fallback");
+  const [simpleDefaultsNote, setSimpleDefaultsNote] = useState("Using default Simple Scan values.");
+  const [latestProcessedJob, setLatestProcessedJob] = useState(null);
+  const [loadingLatestProcessedJob, setLoadingLatestProcessedJob] = useState(false);
+  const [simpleActionType, setSimpleActionType] = useState("move_to_trash");
+  const [simpleActionPreview, setSimpleActionPreview] = useState(null);
+  const [simplePreviewLoading, setSimplePreviewLoading] = useState(false);
+  const [simpleBatch, setSimpleBatch] = useState(null);
+  const [simpleConfirmHardDelete, setSimpleConfirmHardDelete] = useState(false);
 
   const [jobs, setJobs] = useState([]);
   const [jobsTotal, setJobsTotal] = useState(0);
@@ -196,9 +250,11 @@ export function DashboardPage({
   const [loadingRoots, setLoadingRoots] = useState(false);
   const [loadingJobs, setLoadingJobs] = useState(false);
   const [submittingJob, setSubmittingJob] = useState(false);
+  const [submittingSimpleBatch, setSubmittingSimpleBatch] = useState(false);
   const [deletingRootId, setDeletingRootId] = useState(0);
   const [deletingJobId, setDeletingJobId] = useState("");
   const pollingInFlightRef = useRef(false);
+  const hasAppliedSimpleDefaultsRef = useRef(false);
 
   const selectedRootIds = useMemo(() => Array.from(selectedRoots).sort((a, b) => a - b), [selectedRoots]);
   const totalJobPages = Math.max(1, Math.ceil(jobsTotal / JOB_PAGE_SIZE));
@@ -222,6 +278,10 @@ export function DashboardPage({
 
   const simpleProgressPercent = calculateJobProgressPercent(jobStatus);
   const simpleProgressStatus = jobStatus?.status || "idle";
+  const latestProcessedJobContext = useMemo(
+    () => buildDisplayName(latestProcessedJob),
+    [latestProcessedJob],
+  );
 
   async function loadHealth() {
     try {
@@ -297,12 +357,85 @@ export function DashboardPage({
     }
   }
 
+  function applySimpleDefaults({ path, nextMode, source, note }) {
+    setSimpleRootPath(path);
+    setMode(nextMode);
+    setSimpleDefaultsSource(source);
+    setSimpleDefaultsNote(note);
+    hasAppliedSimpleDefaultsRef.current = true;
+  }
+
+  async function loadLatestProcessedJob() {
+    setLoadingLatestProcessedJob(true);
+    try {
+      const payload = await getLatestProcessedScanJob();
+      setLatestProcessedJob(payload);
+
+      if (!hasAppliedSimpleDefaultsRef.current) {
+        const { selectedRoot, rootsCount } = resolveAutoRoot(payload);
+        const autoPath = selectedRoot?.path || readSimpleScanDefaults().path;
+        const autoNote =
+          rootsCount > 1
+            ? `Auto-selected the first root from ${rootsCount} roots of the latest processed job.`
+            : "Auto-filled from the latest processed job.";
+
+        applySimpleDefaults({
+          path: autoPath,
+          nextMode: payload.mode || "both",
+          source: "latest_job",
+          note: autoNote,
+        });
+      }
+    } catch (err) {
+      const parsed = parseApiError(err);
+      if (parsed.status !== 404) {
+        setError(`Failed to load latest processed job: ${parsed.detail}`);
+      }
+
+      if (!hasAppliedSimpleDefaultsRef.current) {
+        const fallback = readSimpleScanDefaults();
+        applySimpleDefaults({
+          path: fallback.path,
+          nextMode: fallback.mode,
+          source: parsed.status === 404 ? "fallback" : "local_storage",
+          note:
+            parsed.status === 404
+              ? "No processed jobs yet. Using local fallback values."
+              : "Latest processed job is unavailable. Using local fallback values.",
+        });
+      }
+    } finally {
+      setLoadingLatestProcessedJob(false);
+    }
+  }
+
+  async function loadSimpleBatch(batchId) {
+    if (!batchId) {
+      return;
+    }
+
+    try {
+      const payload = await getActionBatch(batchId);
+      setSimpleBatch(payload);
+    } catch (err) {
+      const parsed = parseApiError(err);
+      setError(`Failed to load action batch ${batchId}: ${parsed.detail}`);
+    }
+  }
+
   useEffect(() => {
     if (isSimpleView) {
       return;
     }
     void loadHealth();
     void loadRoots();
+  }, [isSimpleView]);
+
+  useEffect(() => {
+    if (!isSimpleView) {
+      return;
+    }
+    void loadLatestProcessedJob();
   }, [isSimpleView]);
 
   useEffect(() => {
@@ -321,6 +454,24 @@ export function DashboardPage({
     setSelectedJobId(activeJobId);
     void loadJob(activeJobId);
   }, [activeJobId]);
+
+  useEffect(() => {
+    if (!isSimpleView || !jobStatus || isActiveJobStatus(jobStatus.status)) {
+      return;
+    }
+    setLatestProcessedJob(jobStatus);
+  }, [isSimpleView, jobStatus]);
+
+  useEffect(() => {
+    setSimpleActionPreview(null);
+    setSimpleBatch(null);
+  }, [simpleActionType, latestProcessedJob?.job_id]);
+
+  useEffect(() => {
+    if (simpleActionType !== "delete_permanent") {
+      setSimpleConfirmHardDelete(false);
+    }
+  }, [simpleActionType]);
 
   usePolling(
     () => {
@@ -405,6 +556,16 @@ export function DashboardPage({
     },
     2500,
     hasActiveJobs,
+  );
+
+  usePolling(
+    () => {
+      if (simpleBatch?.batch_id) {
+        void loadSimpleBatch(simpleBatch.batch_id);
+      }
+    },
+    2500,
+    Boolean(simpleBatch?.status && ["confirmed", "partially_failed"].includes(simpleBatch.status)),
   );
 
   async function handleCreateRoot(event) {
@@ -530,6 +691,9 @@ export function DashboardPage({
     try {
       const rootId = await resolveRootIdByPath(simpleRootPath.trim());
       const payload = await createScanJob({ mode, root_ids: [rootId] });
+      persistSimpleScanDefaults(simpleRootPath.trim(), mode);
+      setSimpleDefaultsSource("local_storage");
+      setSimpleDefaultsNote("Updated local fallback values from the latest successful scan launch.");
       onJobCreated(payload.job_id);
       setSelectedJobId(payload.job_id);
       setManualJobId(payload.job_id);
@@ -539,6 +703,83 @@ export function DashboardPage({
       setError(`Failed to start scan: ${parsed.detail}`);
     } finally {
       setSubmittingJob(false);
+    }
+  }
+
+  async function handlePreviewSimpleAction(event) {
+    event.preventDefault();
+    if (!latestProcessedJob?.job_id) {
+      return;
+    }
+
+    setSimplePreviewLoading(true);
+    try {
+      const payload = await previewScanJobActionBatch(latestProcessedJob.job_id, {
+        action_type: simpleActionType,
+      });
+      setSimpleActionPreview(payload);
+    } catch (err) {
+      const parsed = parseApiError(err);
+      setError(`Failed to preview last-job action: ${parsed.detail}`);
+    } finally {
+      setSimplePreviewLoading(false);
+    }
+  }
+
+  async function handleCreateSimpleBatch() {
+    if (!latestProcessedJob?.job_id) {
+      return;
+    }
+    if (!simpleActionPreview) {
+      setError("Run preview before creating a draft batch for the latest processed job.");
+      return;
+    }
+
+    setSubmittingSimpleBatch(true);
+    try {
+      const payload = await createScanJobActionBatch(latestProcessedJob.job_id, {
+        action_type: simpleActionType,
+      });
+      setSimpleBatch(payload);
+    } catch (err) {
+      const parsed = parseApiError(err);
+      setError(`Failed to create latest-job batch: ${parsed.detail}`);
+    } finally {
+      setSubmittingSimpleBatch(false);
+    }
+  }
+
+  async function handleConfirmSimpleBatch() {
+    if (!simpleBatch?.batch_id) {
+      return;
+    }
+
+    if (simpleBatch.action_type === "delete_permanent") {
+      if (!simpleConfirmHardDelete) {
+        setError("Explicit destructive confirmation is required for delete_permanent.");
+        return;
+      }
+
+      const hardDeleteConfirmed = window.confirm(
+        `Permanently delete ${simpleBatch.stats?.total ?? 0} file(s) from the latest processed job? ` +
+          "This action is irreversible.",
+      );
+      if (!hardDeleteConfirmed) {
+        return;
+      }
+    }
+
+    setSubmittingSimpleBatch(true);
+    try {
+      await confirmActionBatch(simpleBatch.batch_id, {
+        confirm_delete_permanent: simpleBatch.action_type === "delete_permanent",
+      });
+      await loadSimpleBatch(simpleBatch.batch_id);
+    } catch (err) {
+      const parsed = parseApiError(err);
+      setError(`Failed to confirm latest-job batch: ${parsed.detail}`);
+    } finally {
+      setSubmittingSimpleBatch(false);
     }
   }
 
@@ -629,9 +870,61 @@ export function DashboardPage({
 
         <Panel
           title="Simple Scan"
-          subtitle="Manual run by directory path: mode + start + progress only"
+          subtitle="Manual run by directory path with latest-job defaults and one safe bulk action"
+          actions={
+            <button
+              type="button"
+              className="button button--ghost"
+              onClick={() => void loadLatestProcessedJob()}
+              disabled={loadingLatestProcessedJob}
+            >
+              {loadingLatestProcessedJob ? "Refreshing..." : "Refresh defaults"}
+            </button>
+          }
         >
           <form className="stack" onSubmit={handleSimpleStartScan}>
+            <div className="simple-defaults-card" data-testid="simple-defaults-card">
+              <div className="simple-defaults-card__header">
+                <div>
+                  <strong>Simple defaults</strong>
+                  <div className="hint">
+                    {simpleDefaultsSource === "latest_job"
+                      ? "Source: latest processed job"
+                      : "Source: local fallback"}
+                  </div>
+                </div>
+                {latestProcessedJob ? <StatusBadge value={latestProcessedJob.status} /> : null}
+              </div>
+              <p className="hint">{simpleDefaultsNote}</p>
+              {latestProcessedJob ? (
+                <div className="simple-job-summary">
+                  <div>
+                    <span className="hint">Target job</span>
+                    <div>
+                      <strong>{latestProcessedJobContext.title}</strong>
+                    </div>
+                    <code>{latestProcessedJob.job_id}</code>
+                  </div>
+                  <div>
+                    <span className="hint">Requested</span>
+                    <div>{formatTimestamp(latestProcessedJob.requested_at)}</div>
+                  </div>
+                  <div>
+                    <span className="hint">Roots</span>
+                    <div>{latestProcessedJob.roots?.length || 0}</div>
+                  </div>
+                  <div>
+                    <span className="hint">Groups</span>
+                    <div>
+                      {latestProcessedJob.exact_groups_found}/{latestProcessedJob.similar_groups_found}
+                    </div>
+                  </div>
+                </div>
+              ) : (
+                <p className="hint">Mass action becomes available after the first processed scan job.</p>
+              )}
+            </div>
+
             <label className="field">
               <span>Directory path</span>
               <input
@@ -657,7 +950,7 @@ export function DashboardPage({
               <button type="submit" className="button" disabled={submittingJob || !simpleRootPath.trim()}>
                 {submittingJob ? "Starting..." : "Start Scan"}
               </button>
-              <span className="hint">No metadata deletion is performed in this screen.</span>
+              <span className="hint">Launching scan only updates metadata and local defaults.</span>
             </div>
 
             <div className="simple-progress-card" data-testid="simple-scan-progress">
@@ -676,6 +969,135 @@ export function DashboardPage({
               </div>
             </div>
           </form>
+
+          <div className="simple-action-card" data-testid="simple-action-card">
+            <div className="simple-action-card__header">
+              <div>
+                <strong>Last Job Action</strong>
+                <div className="hint">
+                  Applies to all distinct non-primary files from exact/similar groups of the latest processed job.
+                </div>
+              </div>
+            </div>
+
+            <div className="inline-form">
+              <label className="field simple-action-card__field">
+                <span>Actions</span>
+                <select
+                  aria-label="simple-action-type"
+                  value={simpleActionType}
+                  onChange={(event) => setSimpleActionType(event.target.value)}
+                >
+                  {SIMPLE_SCAN_ACTIONS.map((action) => (
+                    <option key={action.value} value={action.value}>
+                      {action.label}
+                    </option>
+                  ))}
+                </select>
+              </label>
+
+              <button
+                type="button"
+                className="button button--ghost"
+                onClick={(event) => void handlePreviewSimpleAction(event)}
+                disabled={!latestProcessedJob?.job_id || simplePreviewLoading}
+              >
+                {simplePreviewLoading ? "Previewing..." : "Preview Impact"}
+              </button>
+            </div>
+
+            {simpleActionPreview ? (
+              <div className="warning-box" data-testid="simple-action-preview">
+                <strong>Preview</strong>
+                <div className="metric-grid">
+                  <div>
+                    <span className="hint">Files</span>
+                    <div>{simpleActionPreview.files_count}</div>
+                  </div>
+                  <div>
+                    <span className="hint">Bytes</span>
+                    <div>{formatBytes(simpleActionPreview.total_bytes)}</div>
+                  </div>
+                  <div>
+                    <span className="hint">Reclaimable</span>
+                    <div>{formatBytes(simpleActionPreview.estimated_reclaimable_bytes)}</div>
+                  </div>
+                </div>
+                <div className="inline-actions">
+                  <button
+                    type="button"
+                    className="button"
+                    onClick={() => void handleCreateSimpleBatch()}
+                    disabled={submittingSimpleBatch}
+                  >
+                    {submittingSimpleBatch
+                      ? "Creating..."
+                      : `Create Draft Batch (${simpleActionPreview.files_count})`}
+                  </button>
+                </div>
+              </div>
+            ) : null}
+
+            {simpleBatch ? (
+              <div className="batch-card" data-testid="simple-action-batch">
+                <div className="job-card__header">
+                  <div>
+                    <strong>{simpleBatch.action_type}</strong>
+                    <div className="hint">batch_id={simpleBatch.batch_id}</div>
+                  </div>
+                  <StatusBadge value={simpleBatch.status} />
+                </div>
+
+                <div className="metric-grid">
+                  <div>
+                    <span className="hint">Total</span>
+                    <div>{simpleBatch.stats?.total ?? 0}</div>
+                  </div>
+                  <div>
+                    <span className="hint">Pending</span>
+                    <div>{simpleBatch.stats?.pending ?? 0}</div>
+                  </div>
+                  <div>
+                    <span className="hint">Done</span>
+                    <div>{simpleBatch.stats?.done ?? 0}</div>
+                  </div>
+                  <div>
+                    <span className="hint">Failed</span>
+                    <div>{simpleBatch.stats?.failed ?? 0}</div>
+                  </div>
+                </div>
+
+                {simpleBatch.action_type === "delete_permanent" ? (
+                  <label className="switch">
+                    <input
+                      type="checkbox"
+                      checked={simpleConfirmHardDelete}
+                      onChange={(event) => setSimpleConfirmHardDelete(event.target.checked)}
+                    />
+                    <span>I understand this permanently deletes files.</span>
+                  </label>
+                ) : null}
+
+                <div className="inline-actions">
+                  <button
+                    type="button"
+                    className="button"
+                    onClick={() => void handleConfirmSimpleBatch()}
+                    disabled={submittingSimpleBatch || simpleBatch.status !== "draft"}
+                  >
+                    {submittingSimpleBatch ? "Confirming..." : "Confirm Batch"}
+                  </button>
+                  <button
+                    type="button"
+                    className="button button--ghost"
+                    onClick={() => void loadSimpleBatch(simpleBatch.batch_id)}
+                  >
+                    Refresh batch
+                  </button>
+                </div>
+              </div>
+            ) : null}
+          </div>
         </Panel>
       </div>
     );

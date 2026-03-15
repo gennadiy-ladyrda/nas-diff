@@ -28,6 +28,13 @@ class ActionBatchPreviewRequest(BaseModel):
     file_ids: list[int] = Field(min_length=1)
 
 
+class ScanJobActionBatchRequest(BaseModel):
+    action_type: Optional[Literal["move_to_trash", "delete_permanent", "restore"]] = None
+    requested_by: str = Field(default="local_admin", min_length=1, max_length=128)
+    dry_run: bool = False
+    summary: Optional[str] = Field(default=None, max_length=1024)
+
+
 class ActionBatchConfirmRequest(BaseModel):
     confirm_delete_permanent: bool = False
 
@@ -72,6 +79,10 @@ class ActionBatchPreviewResponse(BaseModel):
     files_count: int
     total_bytes: int
     estimated_reclaimable_bytes: int
+
+
+class ScanJobActionBatchPreviewResponse(ActionBatchPreviewResponse):
+    job_id: str
 
 
 class ActionBatchRollbackResponse(BaseModel):
@@ -136,6 +147,59 @@ def preview_action_batch(
         total_bytes=preview.total_bytes,
         estimated_reclaimable_bytes=preview.estimated_reclaimable_bytes,
     )
+
+
+@router.post("/jobs/{job_id}/preview", response_model=ScanJobActionBatchPreviewResponse)
+def preview_scan_job_action_batch(
+    payload: ScanJobActionBatchRequest,
+    job_id: str = Path(..., min_length=1),
+    db: Session = Depends(get_db_session),
+    settings: Settings = Depends(get_settings),
+) -> ScanJobActionBatchPreviewResponse:
+    service = ActionService(db, settings)
+    action_type = payload.action_type or settings.default_file_action
+
+    try:
+        preview = service.preview_scan_job_batch(job_id=job_id, action_type=action_type)
+    except LookupError as exc:
+        raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail=str(exc)) from exc
+    except ValueError as exc:
+        raise HTTPException(status_code=status.HTTP_422_UNPROCESSABLE_ENTITY, detail=str(exc)) from exc
+
+    return ScanJobActionBatchPreviewResponse(
+        job_id=job_id,
+        action_type=preview.action_type,
+        file_ids=preview.file_ids,
+        files_count=preview.files_count,
+        total_bytes=preview.total_bytes,
+        estimated_reclaimable_bytes=preview.estimated_reclaimable_bytes,
+    )
+
+
+@router.post("/jobs/{job_id}/batches", response_model=ActionBatchStatusResponse, status_code=status.HTTP_201_CREATED)
+def create_scan_job_action_batch(
+    payload: ScanJobActionBatchRequest,
+    job_id: str = Path(..., min_length=1),
+    db: Session = Depends(get_db_session),
+    settings: Settings = Depends(get_settings),
+) -> ActionBatchStatusResponse:
+    service = ActionService(db, settings)
+    action_type = payload.action_type or settings.default_file_action
+
+    try:
+        batch = service.create_scan_job_draft_batch(
+            job_id=job_id,
+            action_type=action_type,
+            requested_by=payload.requested_by,
+            dry_run=payload.dry_run,
+            summary=payload.summary,
+        )
+    except LookupError as exc:
+        raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail=str(exc)) from exc
+    except ValueError as exc:
+        raise HTTPException(status_code=status.HTTP_422_UNPROCESSABLE_ENTITY, detail=str(exc)) from exc
+
+    return _serialize_batch(service, batch_id=batch.id)
 
 
 @router.get("/batches/{batch_id}", response_model=ActionBatchStatusResponse)

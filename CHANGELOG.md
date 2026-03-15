@@ -6,6 +6,56 @@
 
 ## [Unreleased]
 
+## [2026-03-15] UI-05 + ACT-03 + UI-06 - Simple Scan defaults, last-job bulk action, hamburger navigation
+
+### Added
+- Новый API для `Simple Scan`:
+  - `GET /api/v1/scan/jobs/latest/processed`;
+  - `POST /api/v1/actions/jobs/{job_id}/preview`;
+  - `POST /api/v1/actions/jobs/{job_id}/batches`.
+- Новые backend tests:
+  - `backend/tests/api/test_api_03_scan_jobs_catalog.py` — latest processed job;
+  - `backend/tests/api/test_act_01_actions.py` — агрегация distinct `non-primary` file ids по job.
+- Новый frontend component test:
+  - `frontend/tests/component/app-navigation.test.jsx` для default route и hamburger-menu.
+
+### Changed
+- `frontend/src/pages/DashboardPage.jsx`:
+  - `Simple Scan` теперь автоподставляет path/mode из последнего processed job;
+  - добавлен fallback через `localStorage`/default values;
+  - добавлен safe action flow `Preview Impact -> Create Draft Batch -> Confirm Batch` для последнего processed job.
+- `frontend/src/App.jsx`:
+  - маршрут `/` переключен на `Simple Scan`;
+  - `Advanced` перенесен на `/advanced`, `/scan` оставлен alias;
+  - `Advanced` и `Review & Actions` перенесены в hamburger-menu с close по outside-click и `Esc`.
+- `frontend/src/api/client.js`:
+  - добавлены клиенты latest-job defaults и job-scoped actions.
+- `frontend/src/styles/global.css`:
+  - добавлены стили hamburger-menu, simple defaults card и simple action card.
+- `docs/specification.md`:
+  - задокументированы новый Simple Scan primary flow и job-scoped actions API.
+
+### Validation
+- `PYTHONPYCACHEPREFIX=/tmp/python-pycache python3 -m compileall backend/app backend/tests`.
+- `PYTHONPATH=. /tmp/nas-diff-venv/bin/python -m pytest -q backend/tests/api/test_act_01_actions.py backend/tests/api/test_api_03_scan_jobs_catalog.py` -> `15 passed`.
+- Ограничение текущего sandbox: `npm` отсутствует (`npm: command not found`), поэтому `vitest`/`playwright` локально не запускались.
+
+## [2026-03-15] TASKS-03 - New briefs for Simple Scan defaults/actions/navigation
+
+### Added
+- Новые task briefs:
+  - `tasks/UI-05.md` — Simple Scan: автоподстановка последнего каталога и режима.
+  - `tasks/ACT-03.md` — Simple Scan: единое действие по всем файлам последнего job.
+  - `tasks/UI-06.md` — hamburger-навигация и старт с Simple Scan.
+
+### Changed
+- `tasks/README.md`:
+  - добавлены новые пункты backlog `19..21`;
+  - обновлен список `Файлы задач`.
+
+### Validation
+- Проверка структуры briefs на соответствие шаблону `TASK_BRIEF.md`.
+
 ## [2026-03-15] UX-SKETCH-01 - Simple Scan screen + Review bulk selection sketch
 
 ### Added

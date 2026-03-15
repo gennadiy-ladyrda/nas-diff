@@ -6,10 +6,20 @@ import uuid
 from dataclasses import dataclass
 from pathlib import Path
 
+from sqlalchemy import select
 from sqlalchemy.orm import Session
 
 from app.config import Settings
-from app.db.models import ActionBatch, ActionItem, File
+from app.db.models import (
+    ActionBatch,
+    ActionItem,
+    ExactGroup,
+    ExactGroupItem,
+    File,
+    ScanJob,
+    SimilarGroup,
+    SimilarGroupItem,
+)
 from app.db.repositories import ActionItemPayload, ActionRepository, FileRepository
 from app.workers.queue import ActionQueueClient
 
@@ -85,6 +95,33 @@ class ActionService:
             files_count=len(files),
             total_bytes=total_bytes,
             estimated_reclaimable_bytes=total_bytes if normalized_action != "restore" else 0,
+        )
+
+    def preview_scan_job_batch(
+        self,
+        *,
+        job_id: str,
+        action_type: str,
+    ) -> ActionBatchPreview:
+        file_ids = self.resolve_scan_job_file_ids(job_id=job_id)
+        return self.preview_batch(action_type=action_type, file_ids=file_ids)
+
+    def create_scan_job_draft_batch(
+        self,
+        *,
+        job_id: str,
+        action_type: str,
+        requested_by: str = "local_admin",
+        dry_run: bool = False,
+        summary: str | None = None,
+    ) -> ActionBatch:
+        file_ids = self.resolve_scan_job_file_ids(job_id=job_id)
+        return self.create_draft_batch(
+            action_type=action_type,
+            file_ids=file_ids,
+            requested_by=requested_by,
+            dry_run=dry_run,
+            summary=summary or f"scan_job={job_id};scope=all_non_primary_groups",
         )
 
     def create_rollback_batch(
@@ -225,6 +262,32 @@ class ActionService:
             if item.status in counters:
                 counters[item.status] += 1
         return counters
+
+    def resolve_scan_job_file_ids(self, *, job_id: str) -> list[int]:
+        if self.session.get(ScanJob, job_id) is None:
+            raise LookupError(f"scan_job={job_id} not found")
+
+        exact_ids = self.session.scalars(
+            select(ExactGroupItem.file_id)
+            .join(ExactGroup, ExactGroup.id == ExactGroupItem.group_id)
+            .where(
+                ExactGroup.job_id == job_id,
+                ExactGroupItem.is_primary == 0,
+            )
+        ).all()
+        similar_ids = self.session.scalars(
+            select(SimilarGroupItem.file_id)
+            .join(SimilarGroup, SimilarGroup.id == SimilarGroupItem.group_id)
+            .where(
+                SimilarGroup.job_id == job_id,
+                SimilarGroupItem.is_primary == 0,
+            )
+        ).all()
+
+        file_ids = sorted({int(file_id) for file_id in [*exact_ids, *similar_ids]})
+        if not file_ids:
+            raise ValueError(f"scan_job={job_id} has no actionable non-primary files")
+        return file_ids
 
     def _build_items(self, *, action_type: str, file_ids: list[int]) -> list[ActionItemPayload]:
         files = self._load_files(file_ids)

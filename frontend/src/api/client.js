@@ -82,6 +82,10 @@ export function getScanJob(jobId) {
   return request(`/scan/jobs/${jobId}`);
 }
 
+export function getLatestProcessedScanJob() {
+  return request("/scan/jobs/latest/processed");
+}
+
 export function deleteScanJob(jobId, { allowStaleRunning = false } = {}) {
   const params = new URLSearchParams();
   if (allowStaleRunning) {
@@ -119,6 +123,20 @@ export function createActionBatch(payload) {
 
 export function previewActionBatch(payload) {
   return request("/actions/batches/preview", {
+    method: "POST",
+    body: JSON.stringify(payload),
+  });
+}
+
+export function previewScanJobActionBatch(jobId, payload) {
+  return request(`/actions/jobs/${jobId}/preview`, {
+    method: "POST",
+    body: JSON.stringify(payload),
+  });
+}
+
+export function createScanJobActionBatch(jobId, payload) {
+  return request(`/actions/jobs/${jobId}/batches`, {
     method: "POST",
     body: JSON.stringify(payload),
   });
