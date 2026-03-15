@@ -2,6 +2,7 @@ import { expect, test } from "@playwright/test";
 
 test("reviews group, creates action batch, confirms execution", async ({ page }) => {
   let batchStatus = "draft";
+  let actionType = "move_to_trash";
 
   await page.route("**/api/v1/**", async (route) => {
     const request = route.request();
@@ -117,7 +118,7 @@ test("reviews group, creates action batch, confirms execution", async ({ page })
         body: JSON.stringify({
           batch_id: "batch-e2e-1",
           status: batchStatus,
-          action_type: "move_to_trash",
+          action_type: actionType,
           stats: {
             total: 1,
             pending: batchStatus === "executed" ? 0 : 1,
@@ -132,6 +133,46 @@ test("reviews group, creates action batch, confirms execution", async ({ page })
               source_path: "/nas/photo/b.jpg",
               target_path: "/nas/.nas-diff-trash/nas/photo/b.jpg",
               status: batchStatus === "executed" ? "done" : "pending",
+              error_message: null,
+            },
+          ],
+        }),
+      });
+      return;
+    }
+
+    if (url.endsWith("/api/v1/actions/batches/batch-e2e-1/rollback") && method === "POST") {
+      actionType = "restore";
+      batchStatus = "executed";
+      await route.fulfill({
+        status: 200,
+        contentType: "application/json",
+        body: JSON.stringify({
+          source_batch_id: "batch-e2e-1",
+          rollback_batch_id: "batch-e2e-rollback-1",
+          status: "confirmed",
+          queued: true,
+        }),
+      });
+      return;
+    }
+
+    if (url.endsWith("/api/v1/actions/batches/batch-e2e-rollback-1") && method === "GET") {
+      await route.fulfill({
+        status: 200,
+        contentType: "application/json",
+        body: JSON.stringify({
+          batch_id: "batch-e2e-rollback-1",
+          status: "executed",
+          action_type: "restore",
+          stats: { total: 1, pending: 0, done: 1, failed: 0, skipped: 0 },
+          items: [
+            {
+              id: 901,
+              file_id: 501,
+              source_path: "/nas/.nas-diff-trash/nas/photo/b.jpg",
+              target_path: "/nas/photo/b.jpg",
+              status: "done",
               error_message: null,
             },
           ],
@@ -162,4 +203,8 @@ test("reviews group, creates action batch, confirms execution", async ({ page })
   await page.getByRole("button", { name: "Confirm Batch" }).click();
   await expect(page.getByTestId("batch-card")).toContainText("executed");
   await expect(page.getByTestId("batch-card")).toContainText("done");
+
+  await page.getByRole("button", { name: "Rollback" }).click();
+  await expect(page.getByTestId("batch-card")).toContainText("batch-e2e-rollback-1");
+  await expect(page.getByTestId("batch-card")).toContainText("restore");
 });

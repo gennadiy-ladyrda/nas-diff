@@ -6,6 +6,35 @@
 
 ## [Unreleased]
 
+## [2026-03-15] QA-02 - Regression coverage for roots/jobs/bulk UX
+
+### Added
+- Новый backend regression тест:
+  - `backend/tests/api/test_qa_02_regression.py` с покрытием:
+    - delete root conflict (`409`) при ссылке из scan job;
+    - scan jobs list/filter в завершенном scan flow;
+    - bulk preview/confirm/execute/rollback сценария.
+- Frontend regression расширения:
+  - `frontend/tests/component/review-page.test.jsx`:
+    - rollback flow после executed `move_to_trash` batch;
+    - проверка `all_filtered` scope + preview-first contract.
+  - `frontend/tests/e2e/review-actions.spec.js`:
+    - добавлен rollback в e2e smoke (`preview -> draft -> confirm -> execute -> rollback`).
+
+### Changed
+- `scripts/ci/run_s3_regression_suite.sh`:
+  - добавлен fallback-выбор python интерпретатора с установленным `pytest`;
+  - добавлен `SKIP_FRONTEND=1` для backend-only прогона;
+  - добавлена явная проверка наличия `npm` перед frontend стадиями.
+
+### Validation
+- `PYTHONPYCACHEPREFIX=/tmp/python-pycache python3 -m compileall backend/app backend/tests frontend/src`.
+- `PYTHONPATH=. /tmp/nas-diff-venv/bin/python -m pytest -q backend/tests/api/test_qa_02_regression.py backend/tests/api/test_api_01_scan_roots.py backend/tests/api/test_api_03_scan_jobs_catalog.py backend/tests/api/test_act_01_actions.py` -> `16 passed`.
+- `PYTHONPATH=. /tmp/nas-diff-venv/bin/python -m pytest -q backend/tests` -> `35 passed`.
+- `docker compose config`.
+- `SKIP_FRONTEND=1 SKIP_PLAYWRIGHT=1 bash scripts/ci/run_s3_regression_suite.sh` -> ok.
+- Ограничение текущего sandbox: `npm` отсутствует, поэтому `vitest/playwright` не запускались.
+
 ## [2026-03-14] ACT-02 - Bulk actions preview, scoped selection и staged destructive confirm
 
 ### Added

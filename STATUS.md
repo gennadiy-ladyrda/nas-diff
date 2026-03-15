@@ -1,11 +1,11 @@
 # STATUS
 
-Актуально на: `2026-03-14`
+Актуально на: `2026-03-15`
 
 ## 1. Общий статус проекта
 - Текущая стадия: v1 baseline закрыт по backend, UI, QA и ops-документации.
 - Продуктовый режим безопасности: `move_to_trash` по умолчанию, `HARD_DELETE_ENABLED=false`.
-- Ближайший фокус: `QA-02` (финальная регрессия roots/jobs/bulk UX после ACT-02).
+- Ближайший фокус: финальный smoke на целевом DSM6-окружении и release freeze v1.
 
 ## 2. Прогресс по backlog
 | Task | Статус | Комментарий |
@@ -27,7 +27,7 @@
 | UI-03 | done | Dashboard переработан в двухколоночный layout, добавлен delete roots с confirm-step и понятными error-messages. |
 | UI-04 | done | Добавлены jobs table (filters/sort/pagination), detail panel по клику и display-name `SCAN-<MODE>-<SEQ>`. |
 | ACT-02 | done | Реализованы bulk scopes (`selected/all_in_group/all_filtered`), preview endpoint и staged confirm для destructive flow. |
-| QA-02 | todo | Не начато: регрессия для roots/jobs/bulk UX. |
+| QA-02 | done | Добавлены регрессионные сценарии roots/jobs/bulk UX и обновлен единый regression runner для локальной воспроизводимости. |
 
 ## 3. Детали выполнения INFRA-01
 - Добавлен единый образ backend (`Python 3.11`, `FastAPI`, `RQ`, `Redis client`) для сервисов `api` и `worker`.
@@ -48,7 +48,7 @@
 - В рабочем каталоге может оставаться legacy-файл `data/nas_diff.db`; актуальный путь хранения БД перенесен в `~/.nas-diff/data`.
 
 ## 6. Следующий практический шаг
-- Выполнить `tasks/QA-02.md` (регрессия roots/jobs/bulk UX и финальная стабилизация сценариев v1).
+- Выполнить финальный smoke на целевом DSM6-инстансе и зафиксировать release checklist v1.
 
 ## 7. Детали выполнения DB-01
 - Добавлен DB-layer на `SQLAlchemy 2.x`:
@@ -335,3 +335,29 @@
 - `PYTHONPATH=. /tmp/nas-diff-venv/bin/python -m pytest -q backend/tests` -> `34 passed`.
 - `docker compose config` -> ok.
 - Ограничение окружения: `node/npm` отсутствуют, поэтому frontend `vitest/playwright` не запускались в текущем sandbox.
+
+## 34. Детали выполнения QA-02
+- Backend regression:
+  - добавлен новый сквозной тест `backend/tests/api/test_qa_02_regression.py`:
+    - root delete conflict (`409`) для root, связанного с job;
+    - scan jobs list/filter сценарий после выполнения scan;
+    - bulk preview (`/actions/batches/preview`) -> create -> confirm -> execute -> rollback.
+- Frontend regression:
+  - `frontend/tests/component/review-page.test.jsx`:
+    - добавлен сценарий rollback после executed `move_to_trash` batch;
+    - подтвержден `all_filtered` scope и preview-first flow.
+  - `frontend/tests/e2e/review-actions.spec.js`:
+    - smoke расширен до полного цикла `preview -> draft -> confirm -> execute -> rollback`.
+- CI regression script:
+  - `scripts/ci/run_s3_regression_suite.sh` теперь:
+    - автоматически подбирает python интерпретатор с доступным `pytest`;
+    - поддерживает `SKIP_FRONTEND=1` для локального backend-only прогона;
+    - дает явную ошибку, если `npm` недоступен.
+
+## 35. Проверки по QA-02
+- `PYTHONPYCACHEPREFIX=/tmp/python-pycache python3 -m compileall backend/app backend/tests frontend/src` -> ok.
+- `PYTHONPATH=. /tmp/nas-diff-venv/bin/python -m pytest -q backend/tests/api/test_qa_02_regression.py backend/tests/api/test_api_01_scan_roots.py backend/tests/api/test_api_03_scan_jobs_catalog.py backend/tests/api/test_act_01_actions.py` -> `16 passed`.
+- `PYTHONPATH=. /tmp/nas-diff-venv/bin/python -m pytest -q backend/tests` -> `35 passed`.
+- `docker compose config` -> ok.
+- `SKIP_FRONTEND=1 SKIP_PLAYWRIGHT=1 bash scripts/ci/run_s3_regression_suite.sh` -> ok (backend-only режим).
+- Ограничение окружения: `npm` отсутствует, поэтому frontend `vitest/playwright` в этом sandbox не запускались.

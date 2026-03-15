@@ -248,4 +248,132 @@ describe("ReviewPage", () => {
       summary: "exact:scope=all_filtered;group=201",
     });
   });
+
+  it("supports rollback after executed move_to_trash batch", async () => {
+    let sourceBatch = {
+      batch_id: "batch-rb-1",
+      status: "draft",
+      action_type: "move_to_trash",
+      stats: { total: 1, pending: 1, done: 0, failed: 0, skipped: 0 },
+      items: [
+        {
+          id: 5001,
+          file_id: 2,
+          source_path: "/nas/photo/b.jpg",
+          target_path: "/nas/.nas-diff-trash/nas/photo/b.jpg",
+          status: "pending",
+          error_message: null,
+        },
+      ],
+    };
+
+    const rollbackBatch = {
+      batch_id: "batch-rb-restore-1",
+      status: "executed",
+      action_type: "restore",
+      stats: { total: 1, pending: 0, done: 1, failed: 0, skipped: 0 },
+      items: [
+        {
+          id: 5002,
+          file_id: 2,
+          source_path: "/nas/.nas-diff-trash/nas/photo/b.jpg",
+          target_path: "/nas/photo/b.jpg",
+          status: "done",
+          error_message: null,
+        },
+      ],
+    };
+
+    const fetchMock = vi.fn(async (input, options = {}) => {
+      const url = String(input);
+      const method = (options.method || "GET").toUpperCase();
+
+      if (url.includes("/api/v1/scan/jobs/job-rb/groups") && method === "GET") {
+        return jsonResponse({
+          job_id: "job-rb",
+          kind: "exact",
+          page: 1,
+          page_size: 100,
+          total: 1,
+          items: [{ id: 301, file_count: 2, reclaimable_bytes: 100 }],
+        });
+      }
+
+      if (url.endsWith("/api/v1/groups/exact/301") && method === "GET") {
+        return jsonResponse({
+          group_kind: "exact",
+          group_id: 301,
+          items: [
+            { file_id: 1, abs_path: "/nas/photo/a.jpg", size_bytes: 100, is_primary: true, decision: null },
+            { file_id: 2, abs_path: "/nas/photo/b.jpg", size_bytes: 100, is_primary: false, decision: null },
+          ],
+        });
+      }
+
+      if (url.endsWith("/api/v1/actions/batches/preview") && method === "POST") {
+        return jsonResponse({
+          action_type: "move_to_trash",
+          file_ids: [2],
+          files_count: 1,
+          total_bytes: 100,
+          estimated_reclaimable_bytes: 100,
+        });
+      }
+
+      if (url.endsWith("/api/v1/actions/batches") && method === "POST") {
+        return jsonResponse(sourceBatch, 201);
+      }
+
+      if (url.endsWith("/api/v1/actions/batches/batch-rb-1/confirm") && method === "POST") {
+        sourceBatch = {
+          ...sourceBatch,
+          status: "executed",
+          stats: { total: 1, pending: 0, done: 1, failed: 0, skipped: 0 },
+          items: sourceBatch.items.map((item) => ({ ...item, status: "done" })),
+        };
+        return jsonResponse({ batch_id: "batch-rb-1", status: "confirmed", queued: true });
+      }
+
+      if (url.endsWith("/api/v1/actions/batches/batch-rb-1/rollback") && method === "POST") {
+        return jsonResponse({
+          source_batch_id: "batch-rb-1",
+          rollback_batch_id: "batch-rb-restore-1",
+          status: "confirmed",
+          queued: true,
+        });
+      }
+
+      if (url.endsWith("/api/v1/actions/batches/batch-rb-1") && method === "GET") {
+        return jsonResponse(sourceBatch);
+      }
+
+      if (url.endsWith("/api/v1/actions/batches/batch-rb-restore-1") && method === "GET") {
+        return jsonResponse(rollbackBatch);
+      }
+
+      return jsonResponse({ detail: `Unhandled mock: ${method} ${url}` }, 404);
+    });
+
+    vi.stubGlobal("fetch", fetchMock);
+
+    render(<ReviewPage activeJobId="job-rb" recentJobIds={["job-rb"]} onSelectJob={vi.fn()} />);
+
+    await screen.findByTestId("group-details-table");
+    await userEvent.click(screen.getByRole("button", { name: "Preview Impact" }));
+    await screen.findByTestId("action-preview-card");
+
+    await userEvent.click(screen.getByRole("button", { name: "Create Draft Batch (1)" }));
+    await screen.findByTestId("batch-card");
+
+    await userEvent.click(screen.getByRole("button", { name: "Confirm Batch" }));
+    await waitFor(() => {
+      expect(screen.getByTestId("batch-card")).toHaveTextContent("executed");
+    });
+
+    await userEvent.click(screen.getByRole("button", { name: "Rollback" }));
+    await waitFor(() => {
+      expect(screen.getByTestId("batch-card")).toHaveTextContent("batch-rb-restore-1");
+      expect(screen.getByTestId("batch-card")).toHaveTextContent("restore");
+    });
+  });
 });
