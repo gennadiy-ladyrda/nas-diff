@@ -1,0 +1,44 @@
+#!/bin/bash
+
+set -eu
+
+export PATH="/usr/local/bin:/var/packages/Docker/target/usr/bin:/usr/bin:/bin:/usr/sbin:/sbin:${PATH:-}"
+
+log() {
+    printf '[nas-diff preinst] %s\n' "$*"
+}
+
+fail() {
+    printf '[nas-diff preinst] ERROR: %s\n' "$*" >&2
+    exit 1
+}
+
+resolve_docker_bin() {
+    local candidate
+
+    for candidate in \
+        /usr/local/bin/docker \
+        /var/packages/Docker/target/usr/bin/docker \
+        /usr/bin/docker
+    do
+        [ -x "${candidate}" ] || continue
+        printf '%s\n' "${candidate}"
+        return 0
+    done
+
+    command -v docker 2>/dev/null || return 1
+}
+
+if ! resolve_docker_bin >/dev/null 2>&1; then
+    fail "Docker is required for nas-diff DSM6 package"
+fi
+
+if [ -n "${SYNOPKG_DSM_VERSION_MAJOR:-}" ]; then
+    case "${SYNOPKG_DSM_VERSION_MAJOR}" in
+        6|6.*) ;;
+        *) fail "nas-diff package is intended for DSM 6.x; detected ${SYNOPKG_DSM_VERSION_MAJOR}" ;;
+    esac
+fi
+
+log "Pre-install checks passed"
+exit 0

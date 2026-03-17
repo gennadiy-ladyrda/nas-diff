@@ -6,14 +6,137 @@
 
 ## [Unreleased]
 
+### Added
+- Новый task brief:
+  - `tasks/OPS-02.md` — перевод поставки `nas-diff` в формат штатного Synology DSM6 приложения (`.spk`) с запуском из стандартного UI.
+- Новый ADR/tech note:
+  - `docs/ops/dsm6-package-adr.md` — решения по DSM6 package toolchain, lifecycle scripts и модели запуска контейнерного стека из package runtime.
+- Новый layout-документ:
+  - `docs/ops/dsm6-package-layout.md` — структура `package/synology-dsm6/`, карта `.spk`-артефактов и границы persistent/immutable данных.
+- Новый skeleton package tree:
+  - `package/synology-dsm6/` с каталогами `SynoBuildConf`, `assets`, `conf`, `scripts`, `payload`, `payload/ui`, `payload/runtime`, `payload/images`, `payload/port_conf`.
+- Initial DSM6 build scaffold:
+  - `package/synology-dsm6/INFO.sh`
+  - `package/synology-dsm6/SynoBuildConf/depends`
+  - `package/synology-dsm6/SynoBuildConf/build`
+  - `package/synology-dsm6/SynoBuildConf/install`
+  - `scripts/build/build_synology_spk.sh`
+  - `just` targets `spk-stage` and `spk-build`
+- Package runtime payload scaffold:
+  - `payload/runtime/compose/docker-compose.package.yml`
+  - `payload/runtime/env/nas-diff.env.template`
+  - `payload/runtime/scripts/common.sh`
+  - `payload/runtime/scripts/render-runtime-env.sh`
+  - `payload/runtime/scripts/render-ui-config.sh`
+  - `payload/runtime/scripts/runtime-preflight.sh`
+  - `payload/runtime/scripts/docker-load-images.sh`
+  - `payload/ui/config`
+  - `conf/resource`
+  - `payload/port_conf/nas-diff.sc`
+- Generated package icons with `DIFF` branding:
+  - `scripts/build/generate_synology_icons.py`
+  - refreshed `PACKAGE_ICON.PNG`, `PACKAGE_ICON_256.PNG`
+  - added launcher icons `payload/ui/images/diff_16.png`, `diff_32.png`, `diff_64.png`
+- Bundled image archive pipeline:
+  - `scripts/build/bundle_synology_images.sh`
+  - `just` targets `spk-images` и `spk-stage-images`
+  - generated `payload/images/manifest.env`
+- Toolkit validation/build handoff:
+  - `scripts/build/check_synology_toolkit.sh`
+  - `just` targets `spk-check` и `spk-build-images`
+  - `docs/ops/dsm6-runbook.md` расширен package build flow для `PkgCreate.py`
+- Dockerized Toolkit wrapper and manual packager:
+  - `scripts/build/build_synology_spk_in_docker.sh`
+  - `scripts/build/docker/synology-toolkit-builder.Dockerfile`
+  - `scripts/build/docker/toolkit-entrypoint.sh`
+  - `scripts/build/build_synology_spk_manual.sh`
+  - `scripts/build/pack_synology_archive.py`
+  - `just` targets `spk-build-docker` и `spk-build-manual`
+- Первый реальный `.spk` build artifact:
+  - `artifacts/synology-spk/nas-diff-x64-0.1.0-0008.spk`
+- Offline execution handoff:
+  - `docs/ops/dsm6-package-build-handoff.md` с командами для build host и DSM host без необходимости возвращаться в чат
+- Runtime wrapper and DSM lifecycle scaffold:
+  - `payload/runtime/env/package.conf.example`
+  - `payload/runtime/scripts/start-stack.sh`
+  - `payload/runtime/scripts/stop-stack.sh`
+  - `payload/runtime/scripts/status-stack.sh`
+  - `scripts/preinst`, `postinst`, `preupgrade`, `postupgrade`, `preuninst`, `postuninst`, `start-stop-status`
+
 ### Changed
 - Hotfix latest-job preview zero-state:
   - `POST /api/v1/actions/jobs/{job_id}/preview` теперь возвращает `200` с нулевым preview, если в job нет actionable `non-primary` duplicate-файлов;
   - `Simple Scan` показывает zero-state вместо error-banner и блокирует создание draft batch при `files_count=0`.
+- `tasks/OPS-02.md`:
+  - добавлена реализационная декомпозиция `OPS-02.1`..`OPS-02.9`;
+  - зафиксирован рекомендуемый стартовый путь: repository-managed `.spk` toolchain и shell lifecycle-скрипты DSM6 как управляющий слой над текущим контейнерным стеком.
+- `tasks/README.md`:
+  - добавлен backlog-пункт `22. OPS-02`;
+  - обновлен список файлов задач.
+- `STATUS.md`:
+  - `OPS-02` переведен в `in_progress`;
+  - зафиксировано закрытие подзадачи `OPS-02.1` через ADR;
+  - ближайший фокус переключен на `OPS-02.3`.
+- `docs/ops/dsm6-package-adr.md` и `docs/ops/dsm6-package-layout.md`:
+  - persistent/runtime paths переведены на стандартные DSM6 package paths `/var/packages/nas-diff/{etc,var,tmp}`.
+- `tasks/OPS-02.md`:
+  - статус `OPS-02.3` расширен ссылками на runtime payload и icon generator.
+- `tasks/OPS-02.md`:
+  - `OPS-02.4` и `OPS-02.5` переведены в `in_progress` с привязкой к runtime-wrapper и package scripts scaffold.
+- `tasks/OPS-02.md`, `STATUS.md`, `docs/ops/dsm6-runbook.md`, `docs/ops/dsm6-package-build-handoff.md`:
+  - `OPS-02.3` переведен в `done`;
+  - зафиксирован быстрый рабочий build path `just spk-build-manual`;
+  - после уточнения целевой NAS package target переведен с DSM 6.2 на DSM 6.1.4-15217 Update 1 (`DS3615xs-j`, `docker-compose 1.28.5`);
+  - следующий практический шаг переключен на DSM 6.1.4 smoke install/start/status/stop на уже собранном `.spk`.
+- `scripts/build/build_synology_spk_manual.sh`:
+  - упаковка `.spk` и `package.tgz` переведена с macOS `bsdtar/pax` на GNU tar compatible writer через `pack_synology_archive.py`;
+  - это устраняет rejection `Неверный формат файла` в DSM Package Center для локально собранного артефакта.
+- `package/synology-dsm6/INFO.sh`, `package/synology-dsm6/SynoBuildConf/depends`, build wrappers:
+  - минимальная поддерживаемая прошивка понижена до `DSM 6.1-15217`;
+  - toolkit defaults переведены на `DSM 6.1 / bromolow`;
+  - package version bumped до `0.1.0-0006`, чтобы отделить DSM 6.1 таргет с `docker-compose 1.28`-compatible image references от предыдущих сборок.
+- `package/synology-dsm6/conf/resource`:
+  - удален из DSM 6.1 package target;
+  - официальный Synology `resource` worker требует DSM `6.2-5941+`, поэтому на DSM 6.1 этот файл нельзя включать в пакет.
+- `render-runtime-env.sh` и `common.sh`:
+  - render step теперь создает `target/runtime/env/nas-diff.env`, который требуется `docker-compose.package.yml`;
+  - package config создается и загружается до рендера env, чтобы первый старт не зависел от позднего `run_compose`.
+- `docker-compose.package.yml`:
+  - удалены nested variable expansions в `image:` полях;
+  - это устраняет ошибку `invalid reference format` на `docker-compose 1.28.5` в DSM 6.1.
+- `package/synology-dsm6/payload/images/README.md`:
+  - задокументированы archive names, manifest и правило не коммитить build artifacts.
+- `scripts/build/bundle_synology_images.sh`, `scripts/build/build_synology_spk.sh`, `scripts/build/build_synology_spk_manual.sh`, `justfile`:
+  - image bundling теперь по умолчанию таргетирует `linux/amd64` и валидирует фактическую архитектуру образов перед `docker save`;
+  - package version bumped до `0.1.0-0008`, чтобы отделить `x86_64`-совместимую пересборку от прежнего артефакта, в который попали образы неверной архитектуры.
+- `package/synology-dsm6/payload/runtime/scripts/start-stack.sh`:
+  - старт контейнерного стека переведен на `docker-compose up -d --force-recreate --remove-orphans`, чтобы после package update DSM гарантированно пересоздавал контейнеры из новых image archives, а не пытался запускать старые wrong-arch экземпляры.
+- `docs/architecture.md`, `docs/ops/dsm6-package-adr.md`, `docs/ops/dsm6-package-layout.md`, `docs/ops/dsm6-runbook.md`:
+  - зафиксированы validated host-факты первого DSM smoke: `DSM 6.1.4-15217 Update 1`, `DS3615xs-j`, `x86_64`, `Docker 20.10.3-0554`, `docker-compose 1.28.5`;
+  - задокументированы архитектурные ограничения package layer: только `linux/amd64` bundled images, explicit path resolution для `docker/docker-compose`, запрет nested interpolation в `image:` полях и исключение `conf/resource` из DSM 6.1 target;
+  - в runbook добавлен troubleshooting case для `exec format error`.
 
 ### Tests
 - Добавлен backend test zero-preview для empty latest-job action flow.
 - Добавлен frontend component test на zero-state `Preview Impact`.
+
+### Validation
+- Проверена связность `tasks/OPS-02.md`, `docs/ops/dsm6-package-adr.md`, `STATUS.md` и `CHANGELOG.md` после фиксации `OPS-02.1`.
+- `bash -n` для package shell scripts и `scripts/build/build_synology_spk.sh`.
+- `bash -n scripts/build/bundle_synology_images.sh`.
+- `bash -n scripts/build/check_synology_toolkit.sh`.
+- `bash -n scripts/build/build_synology_spk_manual.sh scripts/build/build_synology_spk_in_docker.sh scripts/build/docker/toolkit-entrypoint.sh`.
+- `PYTHONPYCACHEPREFIX=/tmp/python-pycache python3 -m py_compile scripts/build/pack_synology_archive.py`.
+- `PYTHONPYCACHEPREFIX=/tmp/python-pycache python3 -m py_compile scripts/build/generate_synology_icons.py`.
+- `python3 scripts/build/generate_synology_icons.py`.
+- `bash scripts/build/build_synology_spk.sh --stage-only`.
+- `bash scripts/build/bundle_synology_images.sh --clean-output --target-platform linux/amd64` -> собраны архивы `api/frontend/redis`.
+- `bash scripts/build/build_synology_spk.sh --stage-only --bundle-images` -> подтвержден единый stage-path с bundled archives.
+- `bash scripts/build/check_synology_toolkit.sh --help`.
+- `bash scripts/build/build_synology_spk_manual.sh --bundle-images --target-platform linux/amd64` -> собран `artifacts/synology-spk/nas-diff-x64-0.1.0-0008.spk`.
+- `tar -xf artifacts/synology-spk/nas-diff-x64-0.1.0-0008.spk` и `tar -xJf package.tgz` -> подтверждена ожидаемая структура root `.spk` и payload.
+- `file artifacts/synology-spk/nas-diff-x64-0.1.0-0008.spk` -> `POSIX tar archive (GNU)`.
+- Локальная симуляция package target в `/tmp`: `render-runtime-env.sh` и `render-ui-config.sh` корректно рендерят env и DSM launcher URL.
 
 ## [2026-03-15] UI-05 + ACT-03 + UI-06 - Simple Scan defaults, last-job bulk action, hamburger navigation
 

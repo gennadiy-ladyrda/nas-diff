@@ -10,6 +10,25 @@
 - Для локального запуска используется `.env.local` и `justfile`
   (`just up`, `just down`, `just ps`, `just logs`, `just health`, `just config`).
 
+## 2A. Подтвержденные ограничения DSM package runtime
+- На подтвержденном target host используются:
+  - `DSM 6.1.4-15217 Update 1`
+  - `DS3615xs-j`
+  - `x86_64`
+  - `Docker 20.10.3-0554`
+  - `docker-compose 1.28.5` в `/usr/local/bin/docker-compose`
+- Для package-поставки bundled container images должны собираться и сохраняться как `linux/amd64`.
+  - Неверная архитектура приводит к `exec format error` уже на entrypoint всех контейнеров, включая `redis`.
+- Package runtime на DSM 6.1 должен быть совместим с `docker-compose` v1.28.x.
+  - В `docker-compose.package.yml` нельзя использовать nested variable expansion в `image:` полях.
+  - Нужно рендерить финальные image refs через env и использовать простые ссылки `${NAS_DIFF_API_IMAGE}`, `${NAS_DIFF_FRONTEND_IMAGE}`, `${NAS_DIFF_REDIS_IMAGE}`.
+- Package scripts не должны полагаться на интерактивный `PATH` shell-сессии.
+  - В Package Center `docker` и `docker-compose` могут не находиться через обычный `command -v`.
+  - Runtime wrapper обязан явно искать бинарники в типовых путях Synology, в том числе `/usr/local/bin/docker-compose` и `/var/packages/Docker/target/usr/bin/docker`.
+- После package update/start контейнеры должны пересоздаваться принудительно.
+  - Иначе DSM может попытаться поднять ранее созданные контейнеры со старым wrong-arch образом.
+  - Для этого package start flow использует `docker-compose up -d --force-recreate --remove-orphans`.
+
 ## 3. Логическая схема компонентов
 1. `Web UI`
 - Настройка скана (Exact/Similar)

@@ -1,7 +1,7 @@
 # DSM6 Runbook (OPS-01)
 
 ## 1. Scope
-This runbook covers installation, operations, update, backup/restore, and troubleshooting for `nas-diff` on Synology DSM6 (`x86`) in a single-node LAN setup.
+This runbook covers installation, operations, update, backup/restore, and troubleshooting for `nas-diff` on Synology DSM 6.1.4 (`x86_64`) in a single-node LAN setup.
 
 ## 2. Safety Defaults
 - Default action: `move_to_trash`.
@@ -9,10 +9,22 @@ This runbook covers installation, operations, update, backup/restore, and troubl
 - Never enable hard delete without an explicit maintenance window and backup.
 
 ## 3. Prerequisites
-- DSM6 host with Container Manager / Docker Compose support.
+- DSM 6.1.4 host with Synology `Docker` package and `docker-compose` support.
 - Access to NAS paths that will be mounted into `/nas`.
 - `docker`, `docker compose`, and `just` available in shell.
 - Clone path for repository, example: `/volume1/docker/nas-diff`.
+
+Validated host facts for the current package target:
+- model: `DS3615xs-j`
+- architecture: `x86_64`
+- DSM: `6.1.4-15217 Update 1`
+- Synology Docker package: `20.10.3-0554`
+- runtime compose binary on DSM host: `/usr/local/bin/docker-compose`
+
+Important compatibility notes:
+- Package lifecycle scripts must not assume the same `PATH` as an interactive SSH session.
+- `docker-compose` on the validated DSM host is `1.28.5`, so package compose manifests must avoid nested interpolation in `image:` fields.
+- Offline bundled images for `.spk` must be `linux/amd64`; otherwise containers fail with `exec format error`.
 
 ## 4. Required Paths and Permissions
 1. Host data directory for SQLite and service data:
@@ -102,6 +114,77 @@ just health
 ```
 5. Check API schema and smoke workflow in UI.
 
+## 7A. Synology Package Build (DSM 6.1.4 `.spk`)
+Use this flow when building the Package Center artifact instead of running plain `docker-compose`.
+
+Detailed offline handoff with exact commands:
+- `docs/ops/dsm6-package-build-handoff.md`
+
+### Preferred local build path
+For the current DSM 6.1.4 package, the fastest reproducible path is a toolkit-compatible manual assembly:
+```bash
+just spk-build-manual linux/amd64
+```
+
+Resulting artifact:
+```text
+artifacts/synology-spk/nas-diff-x64-0.1.0-0008.spk
+```
+
+This path still uses the same staged package layout and bundled offline container images, but does not wait for a full Synology Toolkit build env download.
+The packer writes GNU tar compatible archives to avoid DSM Package Center rejecting macOS-built `pax` archives as invalid format, and bundles `linux/amd64` images to match DSM 6.1 `x86_64` hosts.
+The package start flow force-recreates containers so that an updated package does not keep running stale wrong-arch container instances from a previous install.
+
+### Prerequisites
+- Synology Toolkit installed on the build host.
+- Valid DSM6 platform environment inside toolkit, for example `ds.bromolow-6.1`.
+- Docker daemon available for bundling `api`, `frontend`, and `redis` images.
+
+### 1. Validate toolkit path and platform
+```bash
+just spk-check /path/to/toolkit bromolow
+```
+
+This command verifies:
+- toolkit root;
+- `pkgscripts-ng/PkgCreate.py`;
+- `build_env/ds.<platform>-6.1`;
+- writable `source/` and `result_spk/`.
+
+### 2. Stage package with bundled images
+```bash
+just spk-stage-images
+```
+
+This prepares a toolkit-compatible project tree and bundles offline image archives into `payload/images/`.
+
+### 3. Build `.spk`
+```bash
+just spk-build-images /path/to/toolkit bromolow
+```
+
+Default behavior passes `--no-sign`. Resulting artifact is expected under:
+```text
+<toolkit>/result_spk/
+```
+
+Optional Dockerized Toolkit path:
+```bash
+just spk-build-docker bromolow
+```
+
+### 4. What to verify after build
+- `.spk` exists in `result_spk/`.
+- `INFO` reflects expected `version`, `adminport`, and `dsmuidir`.
+- `package.tgz` contains:
+  - `runtime/`
+  - `ui/`
+  - `images/`
+  - `port_conf/`
+
+### 5. Expected current limitation
+The repository now builds a real `.spk` artifact and prepares lifecycle scaffold, but full install/start validation still requires a real DSM 6.1.4 NAS host.
+
 ## 8. Backup and Restore
 
 ### 8.1 Backup (SQLite + Redis AOF)
@@ -171,6 +254,20 @@ Actions:
 2. Verify read/write rights on scan roots and trash dir at host level.
 3. Confirm trash path exists or can be created (`/nas/.nas-diff-trash`).
 4. Re-run a small batch with `move_to_trash` only.
+
+### Case D: `exec format error`
+Symptoms:
+- all containers restart immediately;
+- `docker logs nas-diff-api` or `docker logs nas-diff-frontend` show `exec user process caused: exec format error`.
+
+Actions:
+1. Confirm image architecture on the build host before packaging.
+2. Rebuild the package with `linux/amd64` bundled images:
+```bash
+just spk-build-manual linux/amd64
+```
+3. Install the new `.spk` over the old package.
+4. Start the package again; runtime scripts already use `--force-recreate` to replace old container instances.
 
 ## 10. Dry-Run Acceptance Checklist
 1. Stack starts from clean host by runbook commands only.
