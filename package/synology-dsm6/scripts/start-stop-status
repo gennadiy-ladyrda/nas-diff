@@ -1,0 +1,50 @@
+#!/bin/bash
+
+set -eu
+
+PKG_TARGET="${SYNOPKG_PKGDEST:-/var/packages/nas-diff/target}"
+RUNTIME_SCRIPTS="${PKG_TARGET}/runtime/scripts"
+
+prestart() {
+    "${RUNTIME_SCRIPTS}/runtime-preflight.sh"
+}
+
+start() {
+    "${RUNTIME_SCRIPTS}/render-runtime-env.sh"
+    "${RUNTIME_SCRIPTS}/render-ui-config.sh"
+    "${RUNTIME_SCRIPTS}/docker-load-images.sh"
+    "${RUNTIME_SCRIPTS}/start-stack.sh"
+}
+
+prestop() {
+    exit 0
+}
+
+stop() {
+    "${RUNTIME_SCRIPTS}/stop-stack.sh"
+}
+
+status() {
+    "${RUNTIME_SCRIPTS}/status-stack.sh"
+}
+
+case "${1:-status}" in
+    prestart)
+        prestart
+        ;;
+    start)
+        start
+        ;;
+    prestop)
+        prestop
+        ;;
+    stop)
+        stop
+        ;;
+    status)
+        status
+        ;;
+    *)
+        exit 4
+        ;;
+esac

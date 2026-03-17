@@ -18,6 +18,12 @@
 - Каталог с SQLite на хосте вынесен в home пользователя: `~/.nas-diff/data` (через `HOST_DATA_DIR`).
 - Для локальной эксплуатации используется `justfile` (`up/down/ps/logs/health/config`).
 
+## 2.2 Следующий этап UX/Operations
+- Dashboard: компактный вертикальный health-блок слева и jobs table как основной центр мониторинга.
+- Jobs lifecycle: API и UI для list/delete jobs с safe-first политикой удаления.
+- Human-friendly job naming: display-name на основе `mode + sequence + timestamp`.
+- Bulk actions: preview последствий + staged-confirm (особенно для destructive режимов).
+
 ## 3. Целевая структура репозитория
 ```text
 nas-diff/
@@ -40,6 +46,7 @@ nas-diff/
 │   │   ├── api/
 │   │   │   ├── routes_health.py
 │   │   │   ├── routes_scan.py
+│   │   │   ├── routes_scan_jobs.py
 │   │   │   ├── routes_groups.py
 │   │   │   └── routes_actions.py
 │   │   ├── core/
@@ -63,7 +70,8 @@ nas-diff/
 │   └── tests/
 │       ├── test_exact_mode.py
 │       ├── test_similar_mode.py
-│       └── test_actions.py
+│       ├── test_actions.py
+│       └── test_scan_jobs_lifecycle.py
 └── frontend/
     ├── Dockerfile
     ├── package.json
@@ -88,6 +96,7 @@ nas-diff/
 4. `Similar Mode`: perceptual hashes и интерфейс сравнения.
 5. `Incremental Scan`: ускорение повторных проходов.
 6. `Reports`: оценка высвобождаемого места и отчет.
+7. `Operational UX`: jobs table, cleanup-flow, roots management и bulk actions safety.
 
 ## 6. Definition of Done для v1
 - Запуск в DSM6 через `docker-compose up -d`.

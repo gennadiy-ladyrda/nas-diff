@@ -10,14 +10,39 @@
 - Для локального запуска используется `.env.local` и `justfile`
   (`just up`, `just down`, `just ps`, `just logs`, `just health`, `just config`).
 
+## 2A. Подтвержденные ограничения DSM package runtime
+- На подтвержденном target host используются:
+  - `DSM 6.1.4-15217 Update 1`
+  - `DS3615xs-j`
+  - `x86_64`
+  - `Docker 20.10.3-0554`
+  - `docker-compose 1.28.5` в `/usr/local/bin/docker-compose`
+- Для package-поставки bundled container images должны собираться и сохраняться как `linux/amd64`.
+  - Неверная архитектура приводит к `exec format error` уже на entrypoint всех контейнеров, включая `redis`.
+- Package runtime на DSM 6.1 должен быть совместим с `docker-compose` v1.28.x.
+  - В `docker-compose.package.yml` нельзя использовать nested variable expansion в `image:` полях.
+  - Нужно рендерить финальные image refs через env и использовать простые ссылки `${NAS_DIFF_API_IMAGE}`, `${NAS_DIFF_FRONTEND_IMAGE}`, `${NAS_DIFF_REDIS_IMAGE}`.
+- Package scripts не должны полагаться на интерактивный `PATH` shell-сессии.
+  - В Package Center `docker` и `docker-compose` могут не находиться через обычный `command -v`.
+  - Runtime wrapper обязан явно искать бинарники в типовых путях Synology, в том числе `/usr/local/bin/docker-compose` и `/var/packages/Docker/target/usr/bin/docker`.
+- После package update/start контейнеры должны пересоздаваться принудительно.
+  - Иначе DSM может попытаться поднять ранее созданные контейнеры со старым wrong-arch образом.
+  - Для этого package start flow использует `docker-compose up -d --force-recreate --remove-orphans`.
+
 ## 3. Логическая схема компонентов
 1. `Web UI`
 - Настройка скана (Exact/Similar)
+- Компактный `System Health` (вертикальный блок слева на dashboard)
+- Таблица scan jobs с выбором строки и детальным статусом
+- Осмысленные display-имена job (`mode + sequence + timestamp`)
+- Управление scan roots, включая удаление ошибочных/ненужных записей
 - Просмотр групп
 - Подтверждение действий (корзина/удаление)
+- Групповые операции с preview последствий и staged-confirm
 
 2. `API Backend (FastAPI)`
 - Управление сканами и статусами
+- Каталог jobs (list/filter/delete) для операционного мониторинга
 - Предоставление данных по группам дублей
 - Формирование action batch
 
@@ -60,6 +85,18 @@
 - `delete_permanent` только при явном подтверждении
 5. Результат фиксируется в `action_items` и `file_movements`.
 
+### 4.3 Каталог jobs и очистка истории
+1. UI получает список jobs (пагинация, фильтры по `status/mode`).
+2. Пользователь выбирает job в таблице, UI показывает detail-row (ошибки, метрики, roots).
+3. Пользователь удаляет неактуальный job через безопасную политику; для stale `running/queued` требуется отдельный confirm-step и серверная stale-проверка.
+4. Удаление job не затрагивает реальные файлы NAS.
+
+### 4.4 Массовые операции (bulk actions)
+1. UI формирует набор файлов (`selected`, `all in group`, `all filtered`).
+2. До confirm показывается preview: количество файлов, суммарный объем, тип действия.
+3. Для `delete_permanent` используется усиленный confirm-step.
+4. После исполнения UI показывает done/failed/skipped и предоставляет rollback для `move_to_trash`.
+
 ## 5. Алгоритмы
 ### 5.1 Exact Mode
 - Кандидаты: группировка по `size_bytes`.
@@ -82,8 +119,10 @@
 ## 6. Безопасность и надежность
 - По умолчанию `HARD_DELETE_ENABLED=false`.
 - Все действия выполняются только через подтвержденный `action_batch`.
+- Для массовых операций обязательны preview и явный staged-confirm.
 - Для перемещений ведется `file_movements`, что дает восстановление.
 - Файлы не затрагиваются во время скана (только чтение), кроме этапа исполнителя действий.
+- Удаление jobs/roots через UI ограничивается метаданными (без воздействия на NAS-файлы).
 
 ## 7. Нефункциональные требования
 - Производительность: тысячи файлов и единицы ТБ должны обрабатываться без исчерпания RAM.

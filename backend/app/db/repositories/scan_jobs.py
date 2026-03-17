@@ -1,11 +1,23 @@
 from __future__ import annotations
 
+from dataclasses import dataclass
 from datetime import datetime, timezone
 
-from sqlalchemy import select
+from sqlalchemy import delete, func, or_, select
 from sqlalchemy.orm import Session
 
-from app.db.models import ScanJob, ScanJobRoot
+from app.db.models import ActionItem, ExactGroup, File, ScanJob, ScanJobRoot, SimilarGroup
+
+
+@dataclass(frozen=True)
+class ScanJobDeleteDependencies:
+    exact_groups: int
+    similar_groups: int
+    action_items: int
+
+    @property
+    def has_blockers(self) -> bool:
+        return (self.exact_groups + self.similar_groups + self.action_items) > 0
 
 
 class ScanJobRepository:
@@ -38,6 +50,83 @@ class ScanJobRepository:
     def list_recent(self, *, limit: int = 50) -> list[ScanJob]:
         stmt = select(ScanJob).order_by(ScanJob.requested_at.desc()).limit(limit)
         return list(self.session.scalars(stmt))
+
+    def get_latest_processed(self) -> ScanJob | None:
+        stmt = (
+            select(ScanJob)
+            .where(ScanJob.status.not_in(("queued", "running")))
+            .order_by(ScanJob.requested_at.desc(), ScanJob.id.desc())
+            .limit(1)
+        )
+        return self.session.scalar(stmt)
+
+    def list_jobs(
+        self,
+        *,
+        page: int = 1,
+        page_size: int = 50,
+        status: str | None = None,
+        mode: str | None = None,
+        order: str = "desc",
+    ) -> tuple[list[ScanJob], int]:
+        filters = []
+        if status is not None:
+            filters.append(ScanJob.status == status)
+        if mode is not None:
+            filters.append(ScanJob.mode == mode)
+
+        order_by = ScanJob.requested_at.desc() if order == "desc" else ScanJob.requested_at.asc()
+        tie_breaker = ScanJob.id.desc() if order == "desc" else ScanJob.id.asc()
+        offset = (page - 1) * page_size
+
+        stmt = (
+            select(ScanJob)
+            .where(*filters)
+            .order_by(order_by, tie_breaker)
+            .offset(offset)
+            .limit(page_size)
+        )
+        total_stmt = select(func.count()).select_from(ScanJob).where(*filters)
+        total = int(self.session.scalar(total_stmt) or 0)
+        return list(self.session.scalars(stmt)), total
+
+    def count_delete_dependencies(self, job_id: str) -> ScanJobDeleteDependencies:
+        exact_groups = int(
+            self.session.scalar(
+                select(func.count()).select_from(ExactGroup).where(ExactGroup.job_id == job_id)
+            )
+            or 0
+        )
+        similar_groups = int(
+            self.session.scalar(
+                select(func.count()).select_from(SimilarGroup).where(SimilarGroup.job_id == job_id)
+            )
+            or 0
+        )
+        action_items = int(
+            self.session.scalar(
+                select(func.count())
+                .select_from(ActionItem)
+                .join(File, File.id == ActionItem.file_id)
+                .where(
+                    or_(
+                        File.first_seen_job_id == job_id,
+                        File.last_seen_job_id == job_id,
+                    )
+                )
+            )
+            or 0
+        )
+        return ScanJobDeleteDependencies(
+            exact_groups=exact_groups,
+            similar_groups=similar_groups,
+            action_items=action_items,
+        )
+
+    def delete(self, job_id: str) -> None:
+        self._require(job_id)
+        self.session.execute(delete(ScanJob).where(ScanJob.id == job_id))
+        self.session.commit()
 
     def update_status(
         self,

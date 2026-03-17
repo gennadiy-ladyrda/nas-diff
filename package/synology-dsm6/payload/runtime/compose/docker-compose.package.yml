@@ -1,0 +1,47 @@
+services:
+  api:
+    image: ${NAS_DIFF_API_IMAGE}
+    container_name: nas-diff-api
+    restart: unless-stopped
+    command: ["uvicorn", "app.main:app", "--host", "0.0.0.0", "--port", "8080"]
+    env_file:
+      - ../env/nas-diff.env
+    depends_on:
+      - redis
+    ports:
+      - "${NAS_DIFF_API_PORT:-18080}:8080"
+    volumes:
+      - ${NAS_DIFF_CONFIG_DIR:-/var/packages/nas-diff/etc/config}:/config:ro
+      - ${HOST_DATA_DIR:-/var/packages/nas-diff/var/data}:/data
+      - ${NAS_MOUNT_PATH:-/volume1}:/nas
+
+  frontend:
+    image: ${NAS_DIFF_FRONTEND_IMAGE}
+    container_name: nas-diff-frontend
+    restart: unless-stopped
+    depends_on:
+      - api
+    ports:
+      - "${NAS_DIFF_FRONTEND_PORT:-15173}:80"
+
+  worker:
+    image: ${NAS_DIFF_API_IMAGE}
+    container_name: nas-diff-worker
+    restart: unless-stopped
+    command: ["python", "-m", "app.worker"]
+    env_file:
+      - ../env/nas-diff.env
+    depends_on:
+      - redis
+    volumes:
+      - ${NAS_DIFF_CONFIG_DIR:-/var/packages/nas-diff/etc/config}:/config:ro
+      - ${HOST_DATA_DIR:-/var/packages/nas-diff/var/data}:/data
+      - ${NAS_MOUNT_PATH:-/volume1}:/nas
+
+  redis:
+    image: ${NAS_DIFF_REDIS_IMAGE}
+    container_name: nas-diff-redis
+    restart: unless-stopped
+    command: ["redis-server", "--appendonly", "yes"]
+    volumes:
+      - ${NAS_DIFF_REDIS_DATA_DIR:-/var/packages/nas-diff/var/redis}:/data

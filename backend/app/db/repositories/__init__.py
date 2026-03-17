@@ -3,7 +3,7 @@ from app.db.repositories.decisions import UserDecisionRepository
 from app.db.repositories.file_hashes import FileHashRepository
 from app.db.repositories.files import FileRepository
 from app.db.repositories.groups import ExactGroupMember, GroupRepository, SimilarGroupMember
-from app.db.repositories.scan_jobs import ScanJobRepository
+from app.db.repositories.scan_jobs import ScanJobDeleteDependencies, ScanJobRepository
 from app.db.repositories.scan_roots import (
     ScanRootAlreadyExistsError,
     ScanRootInUseError,
@@ -19,6 +19,7 @@ __all__ = [
     "GroupRepository",
     "ScanRootAlreadyExistsError",
     "ScanRootInUseError",
+    "ScanJobDeleteDependencies",
     "ScanJobRepository",
     "ScanRootRepository",
     "SimilarGroupMember",

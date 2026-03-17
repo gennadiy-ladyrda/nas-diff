@@ -29,6 +29,8 @@
 ### FR-2: Запуск сканирования
 - Создание `scan_job` с режимом `exact|similar|both`.
 - Отображение прогресса и статуса.
+- `Simple Scan` использует последний обработанный job для автоподстановки пути и режима.
+- При отсутствии истории `Simple Scan` использует локальный fallback (`localStorage`) или дефолт `/nas/photo` + `both`.
 
 ### FR-3: Exact поиск
 - Детектирование 100% одинаковых файлов по `blake3_full`.
@@ -51,6 +53,29 @@
 - Лог всех действий на уровне файла.
 - Отчеты по освобожденному месту.
 
+### FR-8: Каталог и жизненный цикл scan jobs
+- Получение списка jobs с фильтрацией по `status/mode` и пагинацией.
+- Удаление неактуальных jobs из операционного интерфейса.
+- Для зависших `running/queued` jobs допускается явный stale-cleanup (двухшаговое подтверждение в UI + серверная stale-проверка).
+- Удаление jobs не затрагивает реальные NAS-файлы (только метаданные индекса и связанных сущностей).
+
+### FR-9: Операционный dashboard UX
+- Компактный вертикальный блок `System Health` в левой колонке dashboard.
+- Таблица jobs с быстрым обзором (`mode`, `status`, время, ключевые метрики).
+- По клику на job показывается отдельная строка/панель детального статуса.
+- Для оператора отображается человекочитаемое имя job (display-name), при сохранении технического `job_id`.
+
+### FR-10: Групповые операции над файлами
+- Массовые действия для набора файлов (`selected`, `all in group`, `all filtered`).
+- Перед confirm обязателен preview последствий (count/bytes/action).
+- Для `delete_permanent` требуется усиленный confirm-step.
+- Для `move_to_trash` доступен rollback-сценарий после исполнения.
+
+### FR-11: Primary navigation и Simple Scan flow
+- Маршрут по умолчанию (`/`) открывает `Simple Scan`.
+- Доступ к `Advanced` и `Review & Actions` выполняется через hamburger-меню.
+- Меню поддерживает активный маршрут, закрытие по клику вне области и по `Esc`.
+
 ## 5. Нефункциональные требования
 ### NFR-1: Совместимость
 - DSM6, x86, Docker.
@@ -70,6 +95,10 @@
 - Структурированные логи.
 - API endpoint для health и статусов.
 
+### NFR-6: Операционная управляемость
+- Оператор должен быстро найти проблемный job по таблице и детальному статусу.
+- Массовые операции должны быть безопасными по умолчанию и прозрачными по последствиям.
+
 ## 6. Конфигурация
 Обязательные параметры окружения:
 - `NAS_SCAN_ROOTS`
@@ -82,6 +111,7 @@
 - `APP_DATA_DIR` (default: `~/.nas-diff/data`, используется приложением для локального sqlite path вне Docker)
 - `PHASH_DISTANCE_THRESHOLD` (default: 8)
 - `MAX_SCAN_WORKERS` (default: 2)
+- `SCAN_JOB_TIMEOUT_SECONDS` (default: 7200, timeout одного scan job в RQ)
 - `DEFAULT_FILE_ACTION` (default: move_to_trash)
 - `HARD_DELETE_ENABLED` (default: false)
 - `DB_ALLOW_DESTRUCTIVE_MIGRATIONS` (default: false)
@@ -100,8 +130,18 @@
 - Тело: `{ mode, roots[], options }`
 - Ответ: `{ job_id, status }`
 
+- `GET /api/v1/scan/jobs?status=&mode=&page=&page_size=`
+- Ответ: пагинированный список jobs для таблицы в UI
+
 - `GET /api/v1/scan/jobs/{job_id}`
 - Ответ: прогресс и метрики
+
+- `GET /api/v1/scan/jobs/latest/processed`
+- Ответ: последний обработанный job (`status != queued|running`) с attached roots для `Simple Scan`
+
+- `DELETE /api/v1/scan/jobs/{job_id}`
+- Удаление job-метаданных (safe-first; без воздействия на NAS-файлы)
+- Для stale `running/queued` jobs поддерживается `allow_stale_running=true` (иначе `409`)
 
 - `GET /api/v1/scan/jobs/{job_id}/groups?kind=exact|similar`
 - Ответ: пагинированный список групп
@@ -114,6 +154,16 @@
 - Тело: `{ file_id, decision }`
 
 ### Actions
+- `POST /api/v1/actions/batches/preview`
+- Возвращает последствия массовой операции до confirm (`files_count`, `total_bytes`, `estimated_reclaimable_bytes`)
+
+- `POST /api/v1/actions/jobs/{job_id}/preview`
+- Возвращает preview для всех distinct `non-primary` файлов exact/similar групп указанного job
+- Если в job нет actionable duplicate-файлов, endpoint возвращает `200` с нулевыми count/bytes, без ошибки
+
+- `POST /api/v1/actions/jobs/{job_id}/batches`
+- Создает draft batch для всех distinct `non-primary` файлов exact/similar групп указанного job
+
 - `POST /api/v1/actions/batches`
 - Создает draft batch
 
@@ -154,6 +204,8 @@
 - Unit: hashing, grouping, scoring.
 - Integration: полный цикл scan -> groups -> action batch -> execute.
 - Regression: rollback после move_to_trash.
+- UI integration: таблица jobs, detail-row и delete-root/delete-job сценарии.
+- E2E smoke: bulk preview -> confirm -> execute -> rollback.
 
 ## 12. Релизная стратегия
 1. Alpha: только Exact + ручной review.

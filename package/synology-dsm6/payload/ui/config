@@ -1,0 +1,12 @@
+{
+  ".url": {
+    "SYNO.SDS.NASDiff.Application": {
+      "type": "url",
+      "icon": "images/diff_64.png",
+      "title": "NAS Diff",
+      "desc": "Duplicate photo review and cleanup",
+      "url": "__NAS_DIFF_UI_URL__",
+      "allUsers": true
+    }
+  }
+}

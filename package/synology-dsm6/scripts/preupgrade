@@ -1,0 +1,28 @@
+#!/bin/bash
+
+set -eu
+
+export PATH="/usr/local/bin:/var/packages/Docker/target/usr/bin:/usr/bin:/bin:/usr/sbin:/sbin:${PATH:-}"
+
+resolve_docker_bin() {
+    local candidate
+
+    for candidate in \
+        /usr/local/bin/docker \
+        /var/packages/Docker/target/usr/bin/docker \
+        /usr/bin/docker
+    do
+        [ -x "${candidate}" ] || continue
+        printf '%s\n' "${candidate}"
+        return 0
+    done
+
+    command -v docker 2>/dev/null || return 1
+}
+
+if ! resolve_docker_bin >/dev/null 2>&1; then
+    printf '[nas-diff preupgrade] ERROR: Docker is required for upgrade\n' >&2
+    exit 1
+fi
+
+exit 0

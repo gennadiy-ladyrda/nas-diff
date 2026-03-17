@@ -32,6 +32,7 @@ class FileRepository:
         first_seen_job_id: str | None = None,
         last_seen_job_id: str | None = None,
         is_present: int = 1,
+        autocommit: bool = True,
     ) -> File:
         existing = self.get_by_abs_path(abs_path)
 
@@ -80,8 +81,12 @@ class FileRepository:
             file_obj.last_seen_job_id = last_seen_job_id
             file_obj.is_present = is_present
 
-        self.session.commit()
-        self.session.refresh(file_obj)
+        if autocommit:
+            self.session.commit()
+            self.session.refresh(file_obj)
+        elif existing is None:
+            # Keep batched transactions in scanner while still assigning PK for hash rows.
+            self.session.flush()
         return file_obj
 
     def get(self, file_id: int) -> File | None:
