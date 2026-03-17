@@ -42,6 +42,12 @@ export function updateScanRoot(rootId, enabled) {
   });
 }
 
+export function deleteScanRoot(rootId) {
+  return request(`/scan/roots/${rootId}`, {
+    method: "DELETE",
+  });
+}
+
 export function createScanJob(payload) {
   return request("/scan/jobs", {
     method: "POST",
@@ -49,8 +55,47 @@ export function createScanJob(payload) {
   });
 }
 
+export function listScanJobs({
+  status,
+  mode,
+  order = "desc",
+  page = 1,
+  pageSize = 20,
+} = {}) {
+  const params = new URLSearchParams({
+    page: String(page),
+    page_size: String(pageSize),
+    order,
+  });
+
+  if (status && status !== "all") {
+    params.set("status", status);
+  }
+  if (mode && mode !== "all") {
+    params.set("mode", mode);
+  }
+
+  return request(`/scan/jobs?${params.toString()}`);
+}
+
 export function getScanJob(jobId) {
   return request(`/scan/jobs/${jobId}`);
+}
+
+export function getLatestProcessedScanJob() {
+  return request("/scan/jobs/latest/processed");
+}
+
+export function deleteScanJob(jobId, { allowStaleRunning = false } = {}) {
+  const params = new URLSearchParams();
+  if (allowStaleRunning) {
+    params.set("allow_stale_running", "true");
+  }
+
+  const suffix = params.toString() ? `?${params.toString()}` : "";
+  return request(`/scan/jobs/${jobId}${suffix}`, {
+    method: "DELETE",
+  });
 }
 
 export function getScanJobGroups(jobId, kind, page = 1, pageSize = 50) {
@@ -71,6 +116,27 @@ export function saveGroupDecision(kind, groupId, payload) {
 
 export function createActionBatch(payload) {
   return request("/actions/batches", {
+    method: "POST",
+    body: JSON.stringify(payload),
+  });
+}
+
+export function previewActionBatch(payload) {
+  return request("/actions/batches/preview", {
+    method: "POST",
+    body: JSON.stringify(payload),
+  });
+}
+
+export function previewScanJobActionBatch(jobId, payload) {
+  return request(`/actions/jobs/${jobId}/preview`, {
+    method: "POST",
+    body: JSON.stringify(payload),
+  });
+}
+
+export function createScanJobActionBatch(jobId, payload) {
+  return request(`/actions/jobs/${jobId}/batches`, {
     method: "POST",
     body: JSON.stringify(payload),
   });

@@ -86,6 +86,16 @@ describe("ReviewPage", () => {
         return jsonResponse(latestBatch, 201);
       }
 
+      if (url.endsWith("/api/v1/actions/batches/preview") && method === "POST") {
+        return jsonResponse({
+          action_type: "move_to_trash",
+          file_ids: [2],
+          files_count: 1,
+          total_bytes: 100,
+          estimated_reclaimable_bytes: 100,
+        });
+      }
+
       if (url.endsWith("/api/v1/actions/batches/batch-1/confirm") && method === "POST") {
         latestBatch = {
           ...latestBatch,
@@ -116,6 +126,9 @@ describe("ReviewPage", () => {
       expect(screen.getByTestId("group-details-table")).toHaveTextContent("keep");
     });
 
+    await userEvent.click(screen.getByRole("button", { name: "Preview Impact" }));
+    await screen.findByTestId("action-preview-card");
+
     await userEvent.click(screen.getByRole("button", { name: "Create Draft Batch (1)" }));
     await screen.findByTestId("batch-card");
 
@@ -124,6 +137,385 @@ describe("ReviewPage", () => {
     await waitFor(() => {
       expect(screen.getByTestId("batch-card")).toHaveTextContent("executed");
       expect(screen.getByTestId("batch-card")).toHaveTextContent("done");
+    });
+  });
+
+  it("previews all_filtered scope across all loaded groups", async () => {
+    let previewPayload = null;
+    let createPayload = null;
+
+    const fetchMock = vi.fn(async (input, options = {}) => {
+      const url = String(input);
+      const method = (options.method || "GET").toUpperCase();
+
+      if (url.includes("/api/v1/scan/jobs/job-2/groups") && method === "GET") {
+        return jsonResponse({
+          job_id: "job-2",
+          kind: "exact",
+          page: 1,
+          page_size: 100,
+          total: 2,
+          items: [
+            { id: 201, file_count: 2, reclaimable_bytes: 100 },
+            { id: 202, file_count: 2, reclaimable_bytes: 120 },
+          ],
+        });
+      }
+
+      if (url.endsWith("/api/v1/groups/exact/201") && method === "GET") {
+        return jsonResponse({
+          group_kind: "exact",
+          group_id: 201,
+          items: [
+            { file_id: 10, abs_path: "/nas/photo/a1.jpg", size_bytes: 100, is_primary: true, decision: null },
+            { file_id: 11, abs_path: "/nas/photo/a2.jpg", size_bytes: 100, is_primary: false, decision: null },
+          ],
+        });
+      }
+
+      if (url.endsWith("/api/v1/groups/exact/202") && method === "GET") {
+        return jsonResponse({
+          group_kind: "exact",
+          group_id: 202,
+          items: [
+            { file_id: 12, abs_path: "/nas/photo/b1.jpg", size_bytes: 120, is_primary: true, decision: null },
+            { file_id: 13, abs_path: "/nas/photo/b2.jpg", size_bytes: 120, is_primary: false, decision: null },
+          ],
+        });
+      }
+
+      if (url.endsWith("/api/v1/actions/batches/preview") && method === "POST") {
+        previewPayload = JSON.parse(options.body);
+        return jsonResponse({
+          action_type: "move_to_trash",
+          file_ids: [11, 13],
+          files_count: 2,
+          total_bytes: 220,
+          estimated_reclaimable_bytes: 220,
+        });
+      }
+
+      if (url.endsWith("/api/v1/actions/batches") && method === "POST") {
+        createPayload = JSON.parse(options.body);
+        return jsonResponse(
+          {
+            batch_id: "batch-all-filtered",
+            status: "draft",
+            action_type: "move_to_trash",
+            stats: { total: 2, pending: 2, done: 0, failed: 0, skipped: 0 },
+            items: [],
+          },
+          201,
+        );
+      }
+
+      if (url.endsWith("/api/v1/actions/batches/batch-all-filtered") && method === "GET") {
+        return jsonResponse({
+          batch_id: "batch-all-filtered",
+          status: "draft",
+          action_type: "move_to_trash",
+          stats: { total: 2, pending: 2, done: 0, failed: 0, skipped: 0 },
+          items: [],
+        });
+      }
+
+      return jsonResponse({ detail: `Unhandled mock: ${method} ${url}` }, 404);
+    });
+
+    vi.stubGlobal("fetch", fetchMock);
+
+    render(<ReviewPage activeJobId="job-2" recentJobIds={["job-2"]} onSelectJob={vi.fn()} />);
+
+    await screen.findByTestId("group-list");
+    await screen.findByTestId("group-details-table");
+
+    await userEvent.selectOptions(screen.getByLabelText("bulk-scope"), "all_filtered");
+    await userEvent.click(screen.getByRole("button", { name: "Preview Impact" }));
+
+    await waitFor(() => {
+      expect(previewPayload).toEqual({
+        action_type: "move_to_trash",
+        file_ids: [11, 13],
+      });
+    });
+    await screen.findByTestId("action-preview-card");
+
+    await userEvent.click(screen.getByRole("button", { name: "Create Draft Batch (2)" }));
+
+    expect(createPayload).toEqual({
+      action_type: "move_to_trash",
+      file_ids: [11, 13],
+      summary: "exact:scope=all_filtered;group=201",
+    });
+  });
+
+  it("supports rollback after executed move_to_trash batch", async () => {
+    let sourceBatch = {
+      batch_id: "batch-rb-1",
+      status: "draft",
+      action_type: "move_to_trash",
+      stats: { total: 1, pending: 1, done: 0, failed: 0, skipped: 0 },
+      items: [
+        {
+          id: 5001,
+          file_id: 2,
+          source_path: "/nas/photo/b.jpg",
+          target_path: "/nas/.nas-diff-trash/nas/photo/b.jpg",
+          status: "pending",
+          error_message: null,
+        },
+      ],
+    };
+
+    const rollbackBatch = {
+      batch_id: "batch-rb-restore-1",
+      status: "executed",
+      action_type: "restore",
+      stats: { total: 1, pending: 0, done: 1, failed: 0, skipped: 0 },
+      items: [
+        {
+          id: 5002,
+          file_id: 2,
+          source_path: "/nas/.nas-diff-trash/nas/photo/b.jpg",
+          target_path: "/nas/photo/b.jpg",
+          status: "done",
+          error_message: null,
+        },
+      ],
+    };
+
+    const fetchMock = vi.fn(async (input, options = {}) => {
+      const url = String(input);
+      const method = (options.method || "GET").toUpperCase();
+
+      if (url.includes("/api/v1/scan/jobs/job-rb/groups") && method === "GET") {
+        return jsonResponse({
+          job_id: "job-rb",
+          kind: "exact",
+          page: 1,
+          page_size: 100,
+          total: 1,
+          items: [{ id: 301, file_count: 2, reclaimable_bytes: 100 }],
+        });
+      }
+
+      if (url.endsWith("/api/v1/groups/exact/301") && method === "GET") {
+        return jsonResponse({
+          group_kind: "exact",
+          group_id: 301,
+          items: [
+            { file_id: 1, abs_path: "/nas/photo/a.jpg", size_bytes: 100, is_primary: true, decision: null },
+            { file_id: 2, abs_path: "/nas/photo/b.jpg", size_bytes: 100, is_primary: false, decision: null },
+          ],
+        });
+      }
+
+      if (url.endsWith("/api/v1/actions/batches/preview") && method === "POST") {
+        return jsonResponse({
+          action_type: "move_to_trash",
+          file_ids: [2],
+          files_count: 1,
+          total_bytes: 100,
+          estimated_reclaimable_bytes: 100,
+        });
+      }
+
+      if (url.endsWith("/api/v1/actions/batches") && method === "POST") {
+        return jsonResponse(sourceBatch, 201);
+      }
+
+      if (url.endsWith("/api/v1/actions/batches/batch-rb-1/confirm") && method === "POST") {
+        sourceBatch = {
+          ...sourceBatch,
+          status: "executed",
+          stats: { total: 1, pending: 0, done: 1, failed: 0, skipped: 0 },
+          items: sourceBatch.items.map((item) => ({ ...item, status: "done" })),
+        };
+        return jsonResponse({ batch_id: "batch-rb-1", status: "confirmed", queued: true });
+      }
+
+      if (url.endsWith("/api/v1/actions/batches/batch-rb-1/rollback") && method === "POST") {
+        return jsonResponse({
+          source_batch_id: "batch-rb-1",
+          rollback_batch_id: "batch-rb-restore-1",
+          status: "confirmed",
+          queued: true,
+        });
+      }
+
+      if (url.endsWith("/api/v1/actions/batches/batch-rb-1") && method === "GET") {
+        return jsonResponse(sourceBatch);
+      }
+
+      if (url.endsWith("/api/v1/actions/batches/batch-rb-restore-1") && method === "GET") {
+        return jsonResponse(rollbackBatch);
+      }
+
+      return jsonResponse({ detail: `Unhandled mock: ${method} ${url}` }, 404);
+    });
+
+    vi.stubGlobal("fetch", fetchMock);
+
+    render(<ReviewPage activeJobId="job-rb" recentJobIds={["job-rb"]} onSelectJob={vi.fn()} />);
+
+    await screen.findByTestId("group-details-table");
+    await userEvent.click(screen.getByRole("button", { name: "Preview Impact" }));
+    await screen.findByTestId("action-preview-card");
+
+    await userEvent.click(screen.getByRole("button", { name: "Create Draft Batch (1)" }));
+    await screen.findByTestId("batch-card");
+
+    await userEvent.click(screen.getByRole("button", { name: "Confirm Batch" }));
+    await waitFor(() => {
+      expect(screen.getByTestId("batch-card")).toHaveTextContent("executed");
+    });
+
+    await userEvent.click(screen.getByRole("button", { name: "Rollback" }));
+    await waitFor(() => {
+      expect(screen.getByTestId("batch-card")).toHaveTextContent("batch-rb-restore-1");
+      expect(screen.getByTestId("batch-card")).toHaveTextContent("restore");
+    });
+  });
+
+  it("applies one decision to selected files in current group", async () => {
+    const decisionCalls = [];
+    let details = {
+      group_kind: "exact",
+      group_id: 901,
+      items: [
+        { file_id: 1, abs_path: "/nas/photo/a.jpg", size_bytes: 100, is_primary: true, decision: null },
+        { file_id: 2, abs_path: "/nas/photo/b.jpg", size_bytes: 100, is_primary: false, decision: null },
+        { file_id: 3, abs_path: "/nas/photo/c.jpg", size_bytes: 100, is_primary: false, decision: null },
+      ],
+    };
+
+    const fetchMock = vi.fn(async (input, options = {}) => {
+      const url = String(input);
+      const method = (options.method || "GET").toUpperCase();
+
+      if (url.includes("/api/v1/scan/jobs/job-bulk-decision/groups") && method === "GET") {
+        return jsonResponse({
+          job_id: "job-bulk-decision",
+          kind: "exact",
+          page: 1,
+          page_size: 100,
+          total: 1,
+          items: [{ id: 901, file_count: 3, reclaimable_bytes: 200 }],
+        });
+      }
+
+      if (url.endsWith("/api/v1/groups/exact/901") && method === "GET") {
+        return jsonResponse(details);
+      }
+
+      if (url.endsWith("/api/v1/groups/exact/901/decision") && method === "POST") {
+        const payload = JSON.parse(options.body);
+        decisionCalls.push(payload);
+        details = {
+          ...details,
+          items: details.items.map((item) =>
+            item.file_id === payload.file_id ? { ...item, decision: payload.decision } : item,
+          ),
+        };
+        return jsonResponse({ group_kind: "exact", group_id: 901, ...payload, note: null });
+      }
+
+      return jsonResponse({ detail: `Unhandled mock: ${method} ${url}` }, 404);
+    });
+
+    vi.stubGlobal("fetch", fetchMock);
+
+    render(<ReviewPage activeJobId="job-bulk-decision" recentJobIds={["job-bulk-decision"]} onSelectJob={vi.fn()} />);
+
+    await screen.findByTestId("group-details-table");
+    await userEvent.selectOptions(screen.getByLabelText("bulk-decision"), "trash");
+    await userEvent.click(screen.getByRole("button", { name: "Apply To Selected (2)" }));
+
+    await waitFor(() => {
+      expect(decisionCalls).toHaveLength(2);
+      expect(decisionCalls).toEqual([
+        { file_id: 2, decision: "trash" },
+        { file_id: 3, decision: "trash" },
+      ]);
+    });
+  });
+
+  it("applies one decision to all files in selected groups", async () => {
+    const decisionCalls = [];
+    const detailsByGroupId = {
+      501: {
+        group_kind: "exact",
+        group_id: 501,
+        items: [
+          { file_id: 1, abs_path: "/nas/photo/a1.jpg", size_bytes: 100, is_primary: true, decision: null },
+          { file_id: 2, abs_path: "/nas/photo/a2.jpg", size_bytes: 100, is_primary: false, decision: null },
+        ],
+      },
+      502: {
+        group_kind: "exact",
+        group_id: 502,
+        items: [
+          { file_id: 3, abs_path: "/nas/photo/b1.jpg", size_bytes: 120, is_primary: true, decision: null },
+          { file_id: 4, abs_path: "/nas/photo/b2.jpg", size_bytes: 120, is_primary: false, decision: null },
+        ],
+      },
+    };
+
+    const fetchMock = vi.fn(async (input, options = {}) => {
+      const url = String(input);
+      const method = (options.method || "GET").toUpperCase();
+
+      if (url.includes("/api/v1/scan/jobs/job-groups-bulk/groups") && method === "GET") {
+        return jsonResponse({
+          job_id: "job-groups-bulk",
+          kind: "exact",
+          page: 1,
+          page_size: 100,
+          total: 2,
+          items: [
+            { id: 501, file_count: 2, reclaimable_bytes: 100 },
+            { id: 502, file_count: 2, reclaimable_bytes: 120 },
+          ],
+        });
+      }
+
+      if (url.endsWith("/api/v1/groups/exact/501") && method === "GET") {
+        return jsonResponse(detailsByGroupId[501]);
+      }
+
+      if (url.endsWith("/api/v1/groups/exact/502") && method === "GET") {
+        return jsonResponse(detailsByGroupId[502]);
+      }
+
+      if (url.endsWith("/api/v1/groups/exact/501/decision") && method === "POST") {
+        const payload = JSON.parse(options.body);
+        decisionCalls.push({ group_id: 501, ...payload });
+        return jsonResponse({ group_kind: "exact", group_id: 501, ...payload, note: null });
+      }
+
+      if (url.endsWith("/api/v1/groups/exact/502/decision") && method === "POST") {
+        const payload = JSON.parse(options.body);
+        decisionCalls.push({ group_id: 502, ...payload });
+        return jsonResponse({ group_kind: "exact", group_id: 502, ...payload, note: null });
+      }
+
+      return jsonResponse({ detail: `Unhandled mock: ${method} ${url}` }, 404);
+    });
+
+    vi.stubGlobal("fetch", fetchMock);
+
+    render(<ReviewPage activeJobId="job-groups-bulk" recentJobIds={["job-groups-bulk"]} onSelectJob={vi.fn()} />);
+
+    await screen.findByTestId("group-list");
+    await userEvent.click(screen.getByRole("button", { name: "Select All Groups" }));
+    await userEvent.selectOptions(screen.getByLabelText("groups-bulk-decision"), "trash");
+    await userEvent.click(screen.getByRole("button", { name: "Apply To Selected Groups (2)" }));
+
+    await waitFor(() => {
+      expect(decisionCalls).toEqual([
+        { group_id: 501, file_id: 2, decision: "trash" },
+        { group_id: 502, file_id: 4, decision: "trash" },
+      ]);
     });
   });
 });

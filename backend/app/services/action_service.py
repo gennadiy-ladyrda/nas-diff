@@ -3,16 +3,36 @@ from __future__ import annotations
 import os
 import shutil
 import uuid
+from dataclasses import dataclass
 from pathlib import Path
 
+from sqlalchemy import select
 from sqlalchemy.orm import Session
 
 from app.config import Settings
-from app.db.models import ActionBatch, ActionItem, File
+from app.db.models import (
+    ActionBatch,
+    ActionItem,
+    ExactGroup,
+    ExactGroupItem,
+    File,
+    ScanJob,
+    SimilarGroup,
+    SimilarGroupItem,
+)
 from app.db.repositories import ActionItemPayload, ActionRepository, FileRepository
 from app.workers.queue import ActionQueueClient
 
 _ALLOWED_ACTION_TYPES = {"move_to_trash", "delete_permanent", "restore"}
+
+
+@dataclass(frozen=True)
+class ActionBatchPreview:
+    action_type: str
+    file_ids: list[int]
+    files_count: int
+    total_bytes: int
+    estimated_reclaimable_bytes: int
 
 
 class ActionService:
@@ -31,9 +51,7 @@ class ActionService:
         dry_run: bool = False,
         summary: str | None = None,
     ) -> ActionBatch:
-        normalized_action = action_type.strip().lower()
-        if normalized_action not in _ALLOWED_ACTION_TYPES:
-            raise ValueError("action_type must be one of: move_to_trash, delete_permanent, restore")
+        normalized_action = _normalize_action_type(action_type)
 
         normalized_file_ids = _normalize_file_ids(file_ids)
         if not normalized_file_ids:
@@ -50,6 +68,70 @@ class ActionService:
         )
         self.actions.add_items(batch_id=batch.id, items=items)
         return batch
+
+    def preview_batch(
+        self,
+        *,
+        action_type: str,
+        file_ids: list[int],
+    ) -> ActionBatchPreview:
+        normalized_action = _normalize_action_type(action_type)
+        normalized_file_ids = _normalize_file_ids(file_ids)
+        if not normalized_file_ids:
+            raise ValueError("file_ids must not be empty")
+
+        files = self._load_files(normalized_file_ids)
+        total_bytes = sum(int(file_obj.size_bytes or 0) for file_obj in files)
+
+        if normalized_action == "restore":
+            for file_obj in files:
+                movement = self.actions.get_latest_unrestored_movement(file_id=file_obj.id)
+                if movement is None:
+                    raise LookupError(f"no unrestored movement found for file_id={file_obj.id}")
+
+        return ActionBatchPreview(
+            action_type=normalized_action,
+            file_ids=[file_obj.id for file_obj in files],
+            files_count=len(files),
+            total_bytes=total_bytes,
+            estimated_reclaimable_bytes=total_bytes if normalized_action != "restore" else 0,
+        )
+
+    def preview_scan_job_batch(
+        self,
+        *,
+        job_id: str,
+        action_type: str,
+    ) -> ActionBatchPreview:
+        normalized_action = _normalize_action_type(action_type)
+        file_ids = self._list_scan_job_file_ids(job_id=job_id)
+        if not file_ids:
+            return ActionBatchPreview(
+                action_type=normalized_action,
+                file_ids=[],
+                files_count=0,
+                total_bytes=0,
+                estimated_reclaimable_bytes=0,
+            )
+        return self.preview_batch(action_type=normalized_action, file_ids=file_ids)
+
+    def create_scan_job_draft_batch(
+        self,
+        *,
+        job_id: str,
+        action_type: str,
+        requested_by: str = "local_admin",
+        dry_run: bool = False,
+        summary: str | None = None,
+    ) -> ActionBatch:
+        file_ids = self.resolve_scan_job_file_ids(job_id=job_id)
+        return self.create_draft_batch(
+            action_type=action_type,
+            file_ids=file_ids,
+            requested_by=requested_by,
+            dry_run=dry_run,
+            summary=summary or f"scan_job={job_id};scope=all_non_primary_groups",
+        )
 
     def create_rollback_batch(
         self,
@@ -189,6 +271,35 @@ class ActionService:
             if item.status in counters:
                 counters[item.status] += 1
         return counters
+
+    def resolve_scan_job_file_ids(self, *, job_id: str) -> list[int]:
+        file_ids = self._list_scan_job_file_ids(job_id=job_id)
+        if not file_ids:
+            raise ValueError(f"scan_job={job_id} has no actionable non-primary files")
+        return file_ids
+
+    def _list_scan_job_file_ids(self, *, job_id: str) -> list[int]:
+        if self.session.get(ScanJob, job_id) is None:
+            raise LookupError(f"scan_job={job_id} not found")
+
+        exact_ids = self.session.scalars(
+            select(ExactGroupItem.file_id)
+            .join(ExactGroup, ExactGroup.id == ExactGroupItem.group_id)
+            .where(
+                ExactGroup.job_id == job_id,
+                ExactGroupItem.is_primary == 0,
+            )
+        ).all()
+        similar_ids = self.session.scalars(
+            select(SimilarGroupItem.file_id)
+            .join(SimilarGroup, SimilarGroup.id == SimilarGroupItem.group_id)
+            .where(
+                SimilarGroup.job_id == job_id,
+                SimilarGroupItem.is_primary == 0,
+            )
+        ).all()
+
+        return sorted({int(file_id) for file_id in [*exact_ids, *similar_ids]})
 
     def _build_items(self, *, action_type: str, file_ids: list[int]) -> list[ActionItemPayload]:
         files = self._load_files(file_ids)
@@ -343,6 +454,13 @@ def _normalize_file_ids(file_ids: list[int]) -> list[int]:
         seen.add(file_id)
         normalized.append(file_id)
     return normalized
+
+
+def _normalize_action_type(action_type: str) -> str:
+    normalized_action = action_type.strip().lower()
+    if normalized_action not in _ALLOWED_ACTION_TYPES:
+        raise ValueError("action_type must be one of: move_to_trash, delete_permanent, restore")
+    return normalized_action
 
 
 def _next_available_path(path: Path) -> Path:

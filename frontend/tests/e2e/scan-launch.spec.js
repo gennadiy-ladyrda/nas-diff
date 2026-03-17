@@ -1,6 +1,7 @@
 import { expect, test } from "@playwright/test";
 
-test("launches scan job from dashboard and shows final metrics", async ({ page }) => {
+test("launches scan job and shows it in jobs journal with detail panel", async ({ page }) => {
+  let jobs = [];
   let jobPollCount = 0;
 
   await page.route("**/api/v1/**", async (route) => {
@@ -35,7 +36,38 @@ test("launches scan job from dashboard and shows final metrics", async ({ page }
       return;
     }
 
+    if (url.includes("/api/v1/scan/jobs?") && method === "GET") {
+      await route.fulfill({
+        status: 200,
+        contentType: "application/json",
+        body: JSON.stringify({
+          page: 1,
+          page_size: 20,
+          total: jobs.length,
+          items: jobs,
+        }),
+      });
+      return;
+    }
+
     if (url.endsWith("/api/v1/scan/jobs") && method === "POST") {
+      jobs = [
+        {
+          job_id: "job-e2e-1",
+          mode: "both",
+          status: "running",
+          requested_at: "2026-03-14T00:00:00",
+          started_at: "2026-03-14T00:00:01",
+          finished_at: null,
+          error_message: null,
+          files_seen: 4,
+          files_indexed: 4,
+          exact_groups_found: 2,
+          similar_groups_found: 1,
+          reclaimable_bytes: 2048,
+        },
+      ];
+
       await route.fulfill({
         status: 201,
         contentType: "application/json",
@@ -53,6 +85,23 @@ test("launches scan job from dashboard and shows final metrics", async ({ page }
     if (url.endsWith("/api/v1/scan/jobs/job-e2e-1") && method === "GET") {
       jobPollCount += 1;
       const status = jobPollCount < 2 ? "running" : "completed";
+      jobs = [
+        {
+          job_id: "job-e2e-1",
+          mode: "both",
+          status,
+          requested_at: "2026-03-14T00:00:00",
+          started_at: "2026-03-14T00:00:01",
+          finished_at: status === "completed" ? "2026-03-14T00:00:04" : null,
+          error_message: null,
+          files_seen: 4,
+          files_indexed: 4,
+          exact_groups_found: 2,
+          similar_groups_found: 1,
+          reclaimable_bytes: 2048,
+        },
+      ];
+
       await route.fulfill({
         status: 200,
         contentType: "application/json",
@@ -60,9 +109,9 @@ test("launches scan job from dashboard and shows final metrics", async ({ page }
           job_id: "job-e2e-1",
           mode: "both",
           status,
-          requested_at: "2026-03-13T00:00:00",
-          started_at: "2026-03-13T00:00:01",
-          finished_at: status === "completed" ? "2026-03-13T00:00:04" : null,
+          requested_at: "2026-03-14T00:00:00",
+          started_at: "2026-03-14T00:00:01",
+          finished_at: status === "completed" ? "2026-03-14T00:00:04" : null,
           error_message: null,
           files_seen: 4,
           files_indexed: 4,
@@ -87,7 +136,8 @@ test("launches scan job from dashboard and shows final metrics", async ({ page }
   await expect(page.getByRole("heading", { name: "NAS Diff Control Plane" })).toBeVisible();
   await page.getByRole("button", { name: "Start Scan" }).click();
 
-  await expect(page.getByTestId("scan-job-card")).toContainText("job-e2e-1");
-  await expect(page.getByTestId("scan-job-card")).toContainText("completed");
-  await expect(page.getByTestId("scan-job-card")).toContainText("2.0 KB");
+  await expect(page.getByTestId("jobs-table")).toContainText("SCAN-BOTH-0001");
+  await expect(page.getByTestId("job-detail-panel")).toContainText("job-e2e-1");
+  await expect(page.getByTestId("job-detail-panel")).toContainText("completed");
+  await expect(page.getByTestId("job-detail-panel")).toContainText("2.0 KB");
 });

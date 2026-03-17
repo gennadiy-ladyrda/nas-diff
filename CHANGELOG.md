@@ -6,6 +6,294 @@
 
 ## [Unreleased]
 
+### Changed
+- Hotfix latest-job preview zero-state:
+  - `POST /api/v1/actions/jobs/{job_id}/preview` теперь возвращает `200` с нулевым preview, если в job нет actionable `non-primary` duplicate-файлов;
+  - `Simple Scan` показывает zero-state вместо error-banner и блокирует создание draft batch при `files_count=0`.
+
+### Tests
+- Добавлен backend test zero-preview для empty latest-job action flow.
+- Добавлен frontend component test на zero-state `Preview Impact`.
+
+## [2026-03-15] UI-05 + ACT-03 + UI-06 - Simple Scan defaults, last-job bulk action, hamburger navigation
+
+### Added
+- Новый API для `Simple Scan`:
+  - `GET /api/v1/scan/jobs/latest/processed`;
+  - `POST /api/v1/actions/jobs/{job_id}/preview`;
+  - `POST /api/v1/actions/jobs/{job_id}/batches`.
+- Новые backend tests:
+  - `backend/tests/api/test_api_03_scan_jobs_catalog.py` — latest processed job;
+  - `backend/tests/api/test_act_01_actions.py` — агрегация distinct `non-primary` file ids по job.
+- Новый frontend component test:
+  - `frontend/tests/component/app-navigation.test.jsx` для default route и hamburger-menu.
+
+### Changed
+- `frontend/src/pages/DashboardPage.jsx`:
+  - `Simple Scan` теперь автоподставляет path/mode из последнего processed job;
+  - добавлен fallback через `localStorage`/default values;
+  - добавлен safe action flow `Preview Impact -> Create Draft Batch -> Confirm Batch` для последнего processed job.
+- `frontend/src/App.jsx`:
+  - маршрут `/` переключен на `Simple Scan`;
+  - `Advanced` перенесен на `/advanced`, `/scan` оставлен alias;
+  - `Advanced` и `Review & Actions` перенесены в hamburger-menu с close по outside-click и `Esc`.
+- `frontend/src/api/client.js`:
+  - добавлены клиенты latest-job defaults и job-scoped actions.
+- `frontend/src/styles/global.css`:
+  - добавлены стили hamburger-menu, simple defaults card и simple action card.
+- `docs/specification.md`:
+  - задокументированы новый Simple Scan primary flow и job-scoped actions API.
+
+### Validation
+- `PYTHONPYCACHEPREFIX=/tmp/python-pycache python3 -m compileall backend/app backend/tests`.
+- `PYTHONPATH=. /tmp/nas-diff-venv/bin/python -m pytest -q backend/tests/api/test_act_01_actions.py backend/tests/api/test_api_03_scan_jobs_catalog.py` -> `15 passed`.
+- Ограничение текущего sandbox: `npm` отсутствует (`npm: command not found`), поэтому `vitest`/`playwright` локально не запускались.
+
+## [2026-03-15] TASKS-03 - New briefs for Simple Scan defaults/actions/navigation
+
+### Added
+- Новые task briefs:
+  - `tasks/UI-05.md` — Simple Scan: автоподстановка последнего каталога и режима.
+  - `tasks/ACT-03.md` — Simple Scan: единое действие по всем файлам последнего job.
+  - `tasks/UI-06.md` — hamburger-навигация и старт с Simple Scan.
+
+### Changed
+- `tasks/README.md`:
+  - добавлены новые пункты backlog `19..21`;
+  - обновлен список `Файлы задач`.
+
+### Validation
+- Проверка структуры briefs на соответствие шаблону `TASK_BRIEF.md`.
+
+## [2026-03-15] UX-SKETCH-01 - Simple Scan screen + Review bulk selection sketch
+
+### Added
+- Новый упрощенный экран сканирования:
+  - route `"/scan"` в `frontend/src/App.jsx`;
+  - `DashboardPage` в режиме `variant="simple"` показывает только:
+    - поле пути каталога;
+    - выбор режима сканирования;
+    - кнопку запуска;
+    - компактный progress-bar.
+- В `Review & Actions` добавлены элементы для массовой работы:
+  - выбор групп для batch (`select for batch`);
+  - команды `Select All Groups` / `Clear Selection`;
+  - новый scope `selected_groups`;
+  - блок `Batch decision for groups` для назначения одного решения всем non-primary файлам выбранных групп;
+  - блок `Apply one decision to selected files` для массового назначения одного решения выбранным файлам текущей группы.
+- Добавлен component-тест упрощенного режима dashboard:
+  - `frontend/tests/component/dashboard-page.test.jsx`.
+- Добавлены component-тесты массовых решений в `Review`:
+  - `frontend/tests/component/review-page.test.jsx`.
+
+### Changed
+- Навигация в topbar:
+  - `Advanced` (`/`),
+  - `Simple Scan` (`/scan`),
+  - `Review & Actions` (`/review`).
+- Схема preview/create в `ReviewPage` учитывает marker выбранных групп для `selected_groups`.
+- Стили `frontend/src/styles/global.css` расширены для:
+  - simple progress card;
+  - нового layout в списке групп (`group-row__meta`, `group-row__selector`).
+
+### Validation
+- `PYTHONPYCACHEPREFIX=/tmp/python-pycache python3 -m compileall backend/app backend/tests frontend/src`.
+- `docker compose config`.
+- Анализ runtime-логов `frontend/api`:
+  - подтвержден регулярный polling `GET /scan/jobs/{job_id}/groups?...` каждые ~5 сек при открытом `Review`.
+- Ограничение текущего sandbox: `node/npm` отсутствуют, поэтому `vitest/playwright` локально не запускались.
+
+## [2026-03-15] QA-02 - Regression coverage for roots/jobs/bulk UX
+
+### Added
+- Новый backend regression тест:
+  - `backend/tests/api/test_qa_02_regression.py` с покрытием:
+    - delete root conflict (`409`) при ссылке из scan job;
+    - scan jobs list/filter в завершенном scan flow;
+    - bulk preview/confirm/execute/rollback сценария.
+- Frontend regression расширения:
+  - `frontend/tests/component/review-page.test.jsx`:
+    - rollback flow после executed `move_to_trash` batch;
+    - проверка `all_filtered` scope + preview-first contract.
+  - `frontend/tests/e2e/review-actions.spec.js`:
+    - добавлен rollback в e2e smoke (`preview -> draft -> confirm -> execute -> rollback`).
+
+### Changed
+- `scripts/ci/run_s3_regression_suite.sh`:
+  - добавлен fallback-выбор python интерпретатора с установленным `pytest`;
+  - добавлен `SKIP_FRONTEND=1` для backend-only прогона;
+  - добавлена явная проверка наличия `npm` перед frontend стадиями.
+
+### Validation
+- `PYTHONPYCACHEPREFIX=/tmp/python-pycache python3 -m compileall backend/app backend/tests frontend/src`.
+- `PYTHONPATH=. /tmp/nas-diff-venv/bin/python -m pytest -q backend/tests/api/test_qa_02_regression.py backend/tests/api/test_api_01_scan_roots.py backend/tests/api/test_api_03_scan_jobs_catalog.py backend/tests/api/test_act_01_actions.py` -> `16 passed`.
+- `PYTHONPATH=. /tmp/nas-diff-venv/bin/python -m pytest -q backend/tests` -> `35 passed`.
+- `docker compose config`.
+- `SKIP_FRONTEND=1 SKIP_PLAYWRIGHT=1 bash scripts/ci/run_s3_regression_suite.sh` -> ok.
+- Ограничение текущего sandbox: `npm` отсутствует, поэтому `vitest/playwright` не запускались.
+
+## [2026-03-14] ACT-02 - Bulk actions preview, scoped selection и staged destructive confirm
+
+### Added
+- Новый API endpoint `POST /api/v1/actions/batches/preview`:
+  - предварительный расчет последствий массовой операции;
+  - возвращает `action_type`, `file_ids`, `files_count`, `total_bytes`, `estimated_reclaimable_bytes`.
+- В `ReviewPage` добавлены bulk scopes:
+  - `selected`;
+  - `all_in_group`;
+  - `all_filtered`.
+- Новый обязательный UI-шаг `Preview Impact` перед созданием draft batch.
+- Усиленный destructive confirm для `delete_permanent`:
+  - checkbox-подтверждение;
+  - отдельный confirm-step при `Confirm Batch`.
+
+### Changed
+- `backend/app/services/action_service.py`:
+  - добавлен preview-flow с валидацией action/file ids;
+  - для `restore` preview требует наличие unrestored movement.
+- `backend/app/api/routes_actions.py`:
+  - добавлена модель/роут сериализации preview ответа и обработка `404/422`.
+- `frontend/src/pages/ReviewPage.jsx`:
+  - создание draft batch теперь блокируется без preview;
+  - расширен execution report (`pending/done/failed/skipped`);
+  - rollback доступен как быстрый action только для `move_to_trash` batches в `executed/partially_failed`.
+- `frontend/src/api/client.js`:
+  - добавлен метод `previewActionBatch(payload)`.
+- `docs/specification.md`:
+  - `POST /api/v1/actions/batches/preview` переведен из planned в реализованный endpoint.
+
+### Tests
+- `backend/tests/api/test_act_01_actions.py`:
+  - добавлены тесты preview `counts/bytes` и `restore`-ограничения.
+- `frontend/tests/component/review-page.test.jsx`:
+  - обновлен flow под preview-first;
+  - добавлен кейс `all_filtered` scope.
+- `frontend/tests/e2e/review-actions.spec.js`:
+  - обновлен smoke-flow с обязательным preview перед draft.
+
+### Validation
+- `PYTHONPYCACHEPREFIX=/tmp/python-pycache python3 -m compileall backend/app backend/tests frontend/src`.
+- `PYTHONPATH=. /tmp/nas-diff-venv/bin/python -m pytest -q backend/tests/api/test_act_01_actions.py backend/tests/api/test_qa_01_regression.py` -> `6 passed`.
+- `PYTHONPATH=. /tmp/nas-diff-venv/bin/python -m pytest -q backend/tests` -> `34 passed`.
+- `docker compose config`.
+- Ограничение текущего sandbox: `node/npm` отсутствуют, поэтому `vitest/playwright` не запускались.
+
+## [2026-03-14] HOTFIX-UI-POLLING-01 + API-03 stale running cleanup
+
+### Added
+- API `DELETE /api/v1/scan/jobs/{job_id}` расширен query-параметром `allow_stale_running=true` для удаления stale `queued/running` jobs по явному подтверждению оператора.
+- В dashboard jobs table добавлена колонка `Progress` с динамическим progress-bar по каждому job.
+- В component test dashboard добавлен сценарий двухшагового удаления stale running job (обычный delete -> retry с `allow_stale_running=true`).
+
+### Changed
+- `backend/app/api/routes_scan.py`:
+  - удаление `queued/running` job теперь возможно только при двух условиях:
+    - передан `allow_stale_running=true`;
+    - job старше `SCAN_JOB_TIMEOUT_SECONDS` (stale-check по `started_at`/`requested_at`).
+  - для свежих активных jobs возвращается `409` с блокировкой удаления.
+- `frontend/src/api/client.js`:
+  - `deleteScanJob` поддерживает опцию `{ allowStaleRunning }`.
+- `frontend/src/pages/DashboardPage.jsx`:
+  - polling больше не делает full reload таблицы jobs;
+  - background polling точечно обновляет runtime-поля активных jobs (`status`, counters, reclaimable, error/finished);
+  - для `409` по active job добавлен confirm-step и retry удаления stale metadata.
+- `frontend/src/styles/global.css`:
+  - добавлены стили progress-bar (`jobs-progress*`) с плавным обновлением ширины.
+- `backend/tests/api/test_api_03_scan_jobs_catalog.py`:
+  - добавлены проверки stale-force-delete и блокировки force-delete для свежего running job.
+
+### Validation
+- `PYTHONPYCACHEPREFIX=/tmp/python-pycache python3 -m compileall backend/app backend/tests frontend/src`.
+- `PYTHONPATH=. /tmp/nas-diff-venv/bin/python -m pytest -q backend/tests/api/test_api_03_scan_jobs_catalog.py` -> `7 passed`.
+- `PYTHONPATH=. /tmp/nas-diff-venv/bin/python -m pytest -q backend/tests` -> `32 passed`.
+- `docker compose config`.
+- Ограничение текущего sandbox: `node/npm` отсутствуют, поэтому `vitest/playwright` не запускались.
+
+## [2026-03-14] UI-03 + UI-04 - Dashboard layout, roots/jobs operations и job journal UX
+
+### Added
+- В frontend API client (`frontend/src/api/client.js`) добавлены методы:
+  - `deleteScanRoot(rootId)`;
+  - `listScanJobs({status, mode, order, page, pageSize})`;
+  - `deleteScanJob(jobId)`.
+- Новый jobs journal UI на dashboard:
+  - таблица jobs с фильтрами/сортировкой/пагинацией;
+  - detail panel по выбранному job;
+  - display-name формата `SCAN-<MODE>-<SEQ>` + timestamp.
+- Поддержка безопасного удаления метаданных из UI:
+  - удаление `scan roots` с confirm-step;
+  - удаление `scan jobs` с confirm-step и обработкой safe-delete конфликтов.
+- Обновлены frontend тесты:
+  - `frontend/tests/component/dashboard-page.test.jsx`;
+  - `frontend/tests/e2e/scan-launch.spec.js`.
+
+### Changed
+- `frontend/src/pages/DashboardPage.jsx`:
+  - переработан layout в формат `left health column + right operations column`;
+  - добавлен `Scan Roots Registry` с `enabled/delete` действиями;
+  - добавлен `Scan Jobs Journal` (table + detail + delete metadata);
+  - улучшена обработка API-ошибок (человеко-читаемые сообщения для roots/jobs delete).
+- `frontend/src/App.jsx`:
+  - добавлен callback `onJobDeleted` для синхронизации recent/active job в local state.
+- `frontend/src/components/StatusBadge.jsx`:
+  - добавлен статус `canceled`.
+- `frontend/src/styles/global.css`:
+  - добавлены стили для dashboard columns, health stack, roots registry, jobs toolbar/table/pagination и active-row состояния.
+
+### Validation
+- `docker compose config`.
+- `PYTHONPATH=. /tmp/nas-diff-venv/bin/python -m pytest -q backend/tests` -> `30 passed`.
+- Ограничение текущего sandbox: `npm` отсутствует (`npm: command not found`), поэтому `vitest/playwright` не запускались.
+
+## [2026-03-14] API-03 - Каталог scan jobs и безопасное удаление
+
+### Added
+- Новый API endpoint `GET /api/v1/scan/jobs`:
+  - фильтры по `status` и `mode`;
+  - пагинация через `page` и `page_size`;
+  - сортировка по `requested_at` (`order=asc|desc`).
+- Новый API endpoint `DELETE /api/v1/scan/jobs/{job_id}` с безопасной политикой удаления.
+- Новый API-тестовый модуль:
+  - `backend/tests/api/test_api_03_scan_jobs_catalog.py`.
+
+### Changed
+- `backend/app/db/repositories/scan_jobs.py`:
+  - добавлены `list_jobs(...)`, `count_delete_dependencies(job_id)`, `delete(job_id)`;
+  - добавлена модель зависимостей удаления `ScanJobDeleteDependencies`.
+- `backend/app/api/routes_scan.py`:
+  - подключен `GET /scan/jobs`;
+  - добавлен `DELETE /scan/jobs/{job_id}` с `404/409/204` контрактом;
+  - добавлены проверки безопасного удаления:
+    - запрет удаления jobs в `queued/running`;
+    - конфликт при наличии `exact_groups`, `similar_groups`, `action_items`.
+- `backend/tests/db/test_repositories.py`:
+  - добавлены проверки list/pagination и dependency-counters для cleanup scan jobs.
+- `backend/app/db/repositories/__init__.py`:
+  - экспортирован `ScanJobDeleteDependencies`.
+
+### Validation
+- `PYTHONPYCACHEPREFIX=/tmp/python-pycache python3 -m compileall backend/app backend/tests`.
+- `PYTHONPATH=. /tmp/nas-diff-venv/bin/python -m pytest -q backend/tests/api/test_api_02_scan_jobs.py backend/tests/api/test_api_03_scan_jobs_catalog.py backend/tests/db/test_repositories.py` -> `14 passed`.
+- `PYTHONPATH=. /tmp/nas-diff-venv/bin/python -m pytest -q backend/tests` -> `30 passed`.
+- `docker compose config`.
+
+## [2026-03-13] TASKS-02 - Новый backlog задач API/UI/ACT/QA
+
+### Added
+- Новые task briefs:
+  - `tasks/API-03.md`;
+  - `tasks/UI-03.md`;
+  - `tasks/UI-04.md`;
+  - `tasks/ACT-02.md`;
+  - `tasks/QA-02.md`.
+
+### Changed
+- `tasks/README.md`: обновлен порядок backlog и список файлов задач.
+- `STATUS.md`: в progress table добавлены новые задачи со статусом `todo`; обновлен ближайший фокус.
+
+### Validation
+- Проверка структуры task-файлов на соответствие `TASK_BRIEF.md`.
+
 ## [2026-03-13] HOTFIX-SCAN-01 - Таймаут scan jobs, rollback после DB ошибок и batched commits
 
 ### Added

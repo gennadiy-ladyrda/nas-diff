@@ -2,6 +2,7 @@ import { expect, test } from "@playwright/test";
 
 test("reviews group, creates action batch, confirms execution", async ({ page }) => {
   let batchStatus = "draft";
+  let actionType = "move_to_trash";
 
   await page.route("**/api/v1/**", async (route) => {
     const request = route.request();
@@ -85,6 +86,21 @@ test("reviews group, creates action batch, confirms execution", async ({ page })
       return;
     }
 
+    if (url.endsWith("/api/v1/actions/batches/preview") && method === "POST") {
+      await route.fulfill({
+        status: 200,
+        contentType: "application/json",
+        body: JSON.stringify({
+          action_type: "move_to_trash",
+          file_ids: [501],
+          files_count: 1,
+          total_bytes: 108,
+          estimated_reclaimable_bytes: 108,
+        }),
+      });
+      return;
+    }
+
     if (url.endsWith("/api/v1/actions/batches/batch-e2e-1/confirm") && method === "POST") {
       batchStatus = "executed";
       await route.fulfill({
@@ -102,7 +118,7 @@ test("reviews group, creates action batch, confirms execution", async ({ page })
         body: JSON.stringify({
           batch_id: "batch-e2e-1",
           status: batchStatus,
-          action_type: "move_to_trash",
+          action_type: actionType,
           stats: {
             total: 1,
             pending: batchStatus === "executed" ? 0 : 1,
@@ -125,6 +141,46 @@ test("reviews group, creates action batch, confirms execution", async ({ page })
       return;
     }
 
+    if (url.endsWith("/api/v1/actions/batches/batch-e2e-1/rollback") && method === "POST") {
+      actionType = "restore";
+      batchStatus = "executed";
+      await route.fulfill({
+        status: 200,
+        contentType: "application/json",
+        body: JSON.stringify({
+          source_batch_id: "batch-e2e-1",
+          rollback_batch_id: "batch-e2e-rollback-1",
+          status: "confirmed",
+          queued: true,
+        }),
+      });
+      return;
+    }
+
+    if (url.endsWith("/api/v1/actions/batches/batch-e2e-rollback-1") && method === "GET") {
+      await route.fulfill({
+        status: 200,
+        contentType: "application/json",
+        body: JSON.stringify({
+          batch_id: "batch-e2e-rollback-1",
+          status: "executed",
+          action_type: "restore",
+          stats: { total: 1, pending: 0, done: 1, failed: 0, skipped: 0 },
+          items: [
+            {
+              id: 901,
+              file_id: 501,
+              source_path: "/nas/.nas-diff-trash/nas/photo/b.jpg",
+              target_path: "/nas/photo/b.jpg",
+              status: "done",
+              error_message: null,
+            },
+          ],
+        }),
+      });
+      return;
+    }
+
     await route.fulfill({
       status: 404,
       contentType: "application/json",
@@ -138,6 +194,8 @@ test("reviews group, creates action batch, confirms execution", async ({ page })
   await page.getByRole("button", { name: "Load" }).click();
 
   await expect(page.getByTestId("group-details-table")).toBeVisible();
+  await page.getByRole("button", { name: "Preview Impact" }).click();
+  await expect(page.getByTestId("action-preview-card")).toBeVisible();
 
   await page.getByRole("button", { name: "Create Draft Batch (1)" }).click();
   await expect(page.getByTestId("batch-card")).toContainText("draft");
@@ -145,4 +203,8 @@ test("reviews group, creates action batch, confirms execution", async ({ page })
   await page.getByRole("button", { name: "Confirm Batch" }).click();
   await expect(page.getByTestId("batch-card")).toContainText("executed");
   await expect(page.getByTestId("batch-card")).toContainText("done");
+
+  await page.getByRole("button", { name: "Rollback" }).click();
+  await expect(page.getByTestId("batch-card")).toContainText("batch-e2e-rollback-1");
+  await expect(page.getByTestId("batch-card")).toContainText("restore");
 });
