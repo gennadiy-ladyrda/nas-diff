@@ -1,0 +1,30 @@
+#!/bin/bash
+
+set -eu
+
+PROJECT_ROOT="$(pwd)"
+
+require_path() {
+    local path="$1"
+
+    if [ ! -e "${PROJECT_ROOT}/${path}" ]; then
+        echo "Missing required package source path: ${path}" >&2
+        exit 1
+    fi
+}
+
+require_path "INFO.sh"
+require_path "SynoBuildConf/install"
+require_path "scripts"
+require_path "conf"
+require_path "payload"
+require_path "PACKAGE_ICON.PNG"
+require_path "PACKAGE_ICON_256.PNG"
+
+chmod 755 "${PROJECT_ROOT}/INFO.sh"
+chmod 755 "${PROJECT_ROOT}/SynoBuildConf/install"
+chmod 755 "${PROJECT_ROOT}/SynoBuildConf/build"
+
+find "${PROJECT_ROOT}/scripts" -type f -exec chmod 755 {} +
+
+echo "nas-diff DSM6 package build stage: no compilation required"

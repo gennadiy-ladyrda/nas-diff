@@ -1,0 +1,11 @@
+#!/bin/bash
+
+set -eu
+
+PKG_TARGET="${SYNOPKG_PKGDEST:-/var/packages/nas-diff/target}"
+RUNTIME_SCRIPTS="${PKG_TARGET}/runtime/scripts"
+
+"${RUNTIME_SCRIPTS}/render-runtime-env.sh"
+"${RUNTIME_SCRIPTS}/render-ui-config.sh"
+
+exit 0

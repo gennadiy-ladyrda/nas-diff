@@ -5,7 +5,7 @@
 ## 1. Общий статус проекта
 - Текущая стадия: v1 baseline закрыт по backend, UI, QA и ops-документации.
 - Продуктовый режим безопасности: `move_to_trash` по умолчанию, `HARD_DELETE_ENABLED=false`.
-- Ближайший фокус: финальный smoke для `Simple Scan` primary flow, затем release freeze v1.
+- Ближайший фокус: прогнать DSM 6.1.4 smoke `install/start/status/stop` на уже собранном `.spk` и затем довести `OPS-02.4/OPS-02.5` по результатам host-side проверки.
 
 ## 2. Прогресс по backlog
 | Task | Статус | Комментарий |
@@ -32,6 +32,7 @@
 | UI-05 | done | `Simple Scan` автоподставляет path/mode из последнего processed job с fallback в localStorage/default. |
 | ACT-03 | done | Добавлен simple action flow `preview -> draft -> confirm` по всем distinct non-primary файлам последнего job. |
 | UI-06 | done | Стартовый маршрут переключен на `Simple Scan`, `Advanced`/`Review` перенесены в hamburger-menu. |
+| OPS-02 | in_progress | Подготовить `.spk`-пакет DSM6 с lifecycle через Package Center и запуском `nas-diff` из штатного UI Synology; после уточнения фактической целевой среды пакет ретаргетирован с DSM 6.2 на DSM 6.1.4-15217 Update 1 (`DS3615xs-j`, `docker-compose 1.28.5`). `OPS-02.3` закрыт рабочим build path'ом (`manual .spk` assembly + bundled `linux/amd64` images), а validated host-факты про compose/runtime compatibility уже зафиксированы в architecture/ops docs; `OPS-02.4/OPS-02.5` остаются в фокусе до DSM smoke install/start/status/stop. |
 
 ## 3. Детали выполнения INFRA-01
 - Добавлен единый образ backend (`Python 3.11`, `FastAPI`, `RQ`, `Redis client`) для сервисов `api` и `worker`.
@@ -52,7 +53,7 @@
 - В рабочем каталоге может оставаться legacy-файл `data/nas_diff.db`; актуальный путь хранения БД перенесен в `~/.nas-diff/data`.
 
 ## 6. Следующий практический шаг
-- Прогнать полный frontend smoke (`vitest`/browser/e2e) в окружении с `node/npm` и зафиксировать release-candidate UX.
+- Взять `artifacts/synology-spk/nas-diff-x64-0.1.0-0008.spk`, установить его на DSM 6.1.4 через Package Center и прогнать smoke `install -> start -> status -> health -> stop`.
 
 ## 7. Детали выполнения DB-01
 - Добавлен DB-layer на `SQLAlchemy 2.x`:

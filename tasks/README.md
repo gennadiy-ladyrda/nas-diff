@@ -24,6 +24,7 @@
 19. `UI-05` - Simple Scan: автоподстановка последнего каталога и режима
 20. `ACT-03` - Simple Scan: одно действие по всем файлам последнего job
 21. `UI-06` - Навигация через hamburger и старт с Simple Scan
+22. `OPS-02` - Synology DSM6 package (`.spk`) и запуск из штатного UI
 
 ## Файлы задач
 - `tasks/INFRA-01.md`
@@ -47,3 +48,4 @@
 - `tasks/UI-05.md`
 - `tasks/ACT-03.md`
 - `tasks/UI-06.md`
+- `tasks/OPS-02.md`
