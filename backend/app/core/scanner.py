@@ -10,8 +10,7 @@ from typing import Iterable
 from sqlalchemy import select
 from sqlalchemy.orm import Session
 
-from app.core.hasher_exact import compute_blake3_full_hex
-from app.core.hasher_similar import compute_dhash64_hex, compute_phash64_hex
+from app.core.hashing import compute_file_hashes
 from app.db.models import File, ScanRoot
 from app.db.repositories import FileHashRepository, FileRepository
 
@@ -75,24 +74,19 @@ def scan_and_index(
 
             if changed:
                 files_indexed += 1
-                hash_repo.upsert(
-                    file_id=file_obj.id,
-                    hash_type="blake3_full",
-                    hash_hex=compute_blake3_full_hex(file_path),
-                    autocommit=False,
-                )
-                hash_repo.upsert(
-                    file_id=file_obj.id,
-                    hash_type="dhash64",
-                    hash_hex=compute_dhash64_hex(file_path),
-                    autocommit=False,
-                )
-                hash_repo.upsert(
-                    file_id=file_obj.id,
-                    hash_type="phash64",
-                    hash_hex=compute_phash64_hex(file_path),
-                    autocommit=False,
-                )
+                computed_hashes = compute_file_hashes(file_path, size_bytes=stat.st_size)
+                for hash_type, hash_hex in (
+                    ("blake3_full", computed_hashes.blake3_full),
+                    ("dhash64", computed_hashes.dhash64),
+                    ("phash64", computed_hashes.phash64),
+                ):
+                    assert hash_hex is not None
+                    hash_repo.upsert(
+                        file_id=file_obj.id,
+                        hash_type=hash_type,
+                        hash_hex=hash_hex,
+                        autocommit=False,
+                    )
                 pending_writes += 3
 
             if pending_writes >= _COMMIT_BATCH_SIZE:

@@ -2,36 +2,26 @@ from __future__ import annotations
 
 from pathlib import Path
 
-_SIMILAR_HASH_BITS = 64
-
+from app.core.hashing import compute_file_hashes
 
 def compute_dhash64_hex(file_path: Path) -> str:
-    data = file_path.read_bytes()
-    if not data:
-        return "0" * 16
-
-    samples = _sample_bytes(data, _SIMILAR_HASH_BITS + 1)
-    value = 0
-    for idx in range(_SIMILAR_HASH_BITS):
-        value <<= 1
-        if samples[idx] > samples[idx + 1]:
-            value |= 1
-    return f"{value:016x}"
+    hash_bundle = compute_file_hashes(
+        file_path,
+        include_blake3_full=False,
+        include_phash64=False,
+    )
+    assert hash_bundle.dhash64 is not None
+    return hash_bundle.dhash64
 
 
 def compute_phash64_hex(file_path: Path) -> str:
-    data = file_path.read_bytes()
-    if not data:
-        return "0" * 16
-
-    samples = _sample_bytes(data, _SIMILAR_HASH_BITS)
-    avg = sum(samples) / float(len(samples))
-    value = 0
-    for sample in samples:
-        value <<= 1
-        if sample >= avg:
-            value |= 1
-    return f"{value:016x}"
+    hash_bundle = compute_file_hashes(
+        file_path,
+        include_blake3_full=False,
+        include_dhash64=False,
+    )
+    assert hash_bundle.phash64 is not None
+    return hash_bundle.phash64
 
 
 def hamming_distance_hex(hash_hex_a: str, hash_hex_b: str) -> int:
@@ -41,18 +31,3 @@ def hamming_distance_hex(hash_hex_a: str, hash_hex_b: str) -> int:
     if hasattr(int, "bit_count"):
         return xor_value.bit_count()  # type: ignore[attr-defined]
     return bin(xor_value).count("1")
-
-
-def _sample_bytes(data: bytes, sample_count: int) -> list[int]:
-    if len(data) == sample_count:
-        return list(data)
-
-    if len(data) > sample_count:
-        step = len(data) / float(sample_count)
-        return [data[min(int(idx * step), len(data) - 1)] for idx in range(sample_count)]
-
-    padded = list(data)
-    last_value = data[-1]
-    while len(padded) < sample_count:
-        padded.append(last_value)
-    return padded

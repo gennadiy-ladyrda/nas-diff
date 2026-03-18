@@ -25,6 +25,7 @@
 20. `ACT-03` - Simple Scan: одно действие по всем файлам последнего job
 21. `UI-06` - Навигация через hamburger и старт с Simple Scan
 22. `OPS-02` - Synology DSM6 package (`.spk`) и запуск из штатного UI
+23. `CORE-04` - Оптимизация чтения файлов в scan pipeline
 
 ## Файлы задач
 - `tasks/INFRA-01.md`
@@ -49,3 +50,4 @@
 - `tasks/ACT-03.md`
 - `tasks/UI-06.md`
 - `tasks/OPS-02.md`
+- `tasks/CORE-04.md`

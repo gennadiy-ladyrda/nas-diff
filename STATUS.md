@@ -1,6 +1,6 @@
 # STATUS
 
-Актуально на: `2026-03-15`
+Актуально на: `2026-03-18`
 
 ## 1. Общий статус проекта
 - Текущая стадия: v1 baseline закрыт по backend, UI, QA и ops-документации.
@@ -33,6 +33,7 @@
 | ACT-03 | done | Добавлен simple action flow `preview -> draft -> confirm` по всем distinct non-primary файлам последнего job. |
 | UI-06 | done | Стартовый маршрут переключен на `Simple Scan`, `Advanced`/`Review` перенесены в hamburger-menu. |
 | OPS-02 | in_progress | Подготовить `.spk`-пакет DSM6 с lifecycle через Package Center и запуском `nas-diff` из штатного UI Synology; после уточнения фактической целевой среды пакет ретаргетирован с DSM 6.2 на DSM 6.1.4-15217 Update 1 (`DS3615xs-j`, `docker-compose 1.28.5`). `OPS-02.3` закрыт рабочим build path'ом (`manual .spk` assembly + bundled `linux/amd64` images), а validated host-факты про compose/runtime compatibility уже зафиксированы в architecture/ops docs; `OPS-02.4/OPS-02.5` остаются в фокусе до DSM smoke install/start/status/stop. |
+| CORE-04 | done | Scan pipeline переведен на единый streaming-pass для `blake3_full` + `dhash64` + `phash64`; подтверждены сохранение legacy hash semantics и одиночное чтение changed-file без роста числа SQLite writer'ов. |
 
 ## 3. Детали выполнения INFRA-01
 - Добавлен единый образ backend (`Python 3.11`, `FastAPI`, `RQ`, `Redis client`) для сервисов `api` и `worker`.
@@ -444,3 +445,21 @@
 - `PYTHONPYCACHEPREFIX=/tmp/python-pycache python3 -m compileall backend/app backend/tests` -> ok.
 - `PYTHONPATH=. /tmp/nas-diff-venv/bin/python -m pytest -q backend/tests/api/test_act_01_actions.py` -> `8 passed`.
 - Ограничение текущего sandbox: `npm` отсутствует (`npm: command not found`), поэтому frontend component tests локально не запускались.
+
+## 43. Детали выполнения CORE-04
+- Scan pipeline оптимизирован без смены API/DB-контрактов:
+  - добавлен `backend/app/core/hashing.py` с общим streaming-pass для `blake3_full`, `dhash64`, `phash64`;
+  - `scanner.py` больше не делает три независимых чтения одного changed-file и не увеличивает число SQLite writer'ов;
+  - публичные helper'ы `hasher_exact.py` и `hasher_similar.py` сохранены, но переведены на общий hashing backend.
+- Сохранена hash semantics:
+  - sampling для `dhash64/phash64` оставлен побитно совместимым с прежней логикой `_sample_bytes`;
+  - для empty/small/64-byte/65-byte/large файлов значения хэшей совпадают с legacy-контрактом.
+- Добавлены регрессионные проверки:
+  - `backend/tests/core/test_core_pipeline.py` расширен тестом на совпадение hash values с legacy-референсом;
+  - добавлен тест, требующий ровно одного открытия файла при `scan_and_index` для changed-file;
+  - `docs/architecture.md` зафиксирован новый pipeline detail: exact/similar hashes считаются в одном streaming-pass.
+
+## 44. Проверки по CORE-04
+- `PYTHONPYCACHEPREFIX=/tmp/python-pycache python3 -m compileall backend/app backend/tests` -> ok.
+- `NAS_MOUNT_PATH=/Users/gena/projects/nas-diff/mock-nas HOST_DATA_DIR=/Users/gena/.nas-diff/data docker compose run --rm -v /Users/gena/projects/nas-diff:/workspace -w /workspace/backend api /bin/sh -lc 'python -m pip install pytest >/tmp/pytest-install.log && PYTHONPATH=. python -m pytest -q tests/core/test_core_pipeline.py tests/api/test_qa_02_regression.py'` -> `10 passed`.
+- Ограничение валидации: локальный host `python3` и `/tmp/nas-diff-venv/bin/python` без `pytest`, поэтому backend tests запускались через одноразовый Docker container с mount текущего workspace.

@@ -7,6 +7,11 @@
 ## [Unreleased]
 
 ### Added
+- CORE-04 hashing backend:
+  - `backend/app/core/hashing.py` с общим streaming-pass для `blake3_full`, `dhash64`, `phash64`;
+  - новые регрессионные проверки в `backend/tests/core/test_core_pipeline.py` на сохранение legacy hash semantics и одиночное чтение changed-file.
+- Новый task brief:
+  - `tasks/CORE-04.md` — оптимизация чтения файлов в scan pipeline без изменения API-контрактов и safe-by-default модели.
 - Новый task brief:
   - `tasks/OPS-02.md` — перевод поставки `nas-diff` в формат штатного Synology DSM6 приложения (`.spk`) с запуском из стандартного UI.
 - Новый ADR/tech note:
@@ -64,6 +69,11 @@
   - `scripts/preinst`, `postinst`, `preupgrade`, `postupgrade`, `preuninst`, `postuninst`, `start-stop-status`
 
 ### Changed
+- `backend/app/core/scanner.py`, `backend/app/core/hasher_exact.py`, `backend/app/core/hasher_similar.py`:
+  - scan pipeline больше не выполняет три независимых полных чтения changed-file;
+  - exact/similar hashes вычисляются через общий streaming-pass без полного буферизования больших файлов и без роста числа SQLite writer'ов.
+- `docs/architecture.md`:
+  - зафиксировано, что `blake3_full` и `dhash64/phash64` считаются в одном streaming-pass на файл.
 - Hotfix latest-job preview zero-state:
   - `POST /api/v1/actions/jobs/{job_id}/preview` теперь возвращает `200` с нулевым preview, если в job нет actionable `non-primary` duplicate-файлов;
   - `Simple Scan` показывает zero-state вместо error-banner и блокирует создание draft batch при `files_count=0`.
@@ -73,10 +83,16 @@
 - `tasks/README.md`:
   - добавлен backlog-пункт `22. OPS-02`;
   - обновлен список файлов задач.
+- `tasks/README.md`:
+  - добавлен backlog-пункт `23. CORE-04`;
+  - обновлен список файлов задач.
 - `STATUS.md`:
   - `OPS-02` переведен в `in_progress`;
   - зафиксировано закрытие подзадачи `OPS-02.1` через ADR;
   - ближайший фокус переключен на `OPS-02.3`.
+- `STATUS.md`:
+  - добавлен backlog-статус `planned` для `CORE-04`;
+  - зафиксирован фокус задачи на консолидации чтения файла в scan pipeline без масштабирования числа SQLite writer'ов.
 - `docs/ops/dsm6-package-adr.md` и `docs/ops/dsm6-package-layout.md`:
   - persistent/runtime paths переведены на стандартные DSM6 package paths `/var/packages/nas-diff/{etc,var,tmp}`.
 - `tasks/OPS-02.md`:

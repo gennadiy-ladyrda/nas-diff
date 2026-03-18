@@ -1,14 +1,18 @@
 from __future__ import annotations
 
+import hashlib
 from pathlib import Path
 
+import pytest
 from sqlalchemy import select, text
 from sqlalchemy.orm import Session
 
+from app.core.hashing import compute_file_hashes
 from app.core.dedup_exact import build_exact_groups
 from app.core.dedup_similar import build_similar_groups
 from app.core.decision_engine import apply_auto_primary_scoring
-from app.core.hasher_similar import hamming_distance_hex
+from app.core.hasher_exact import compute_blake3_full_hex
+from app.core.hasher_similar import compute_dhash64_hex, compute_phash64_hex, hamming_distance_hex
 from app.core.scanner import scan_and_index
 from app.db.models import ExactGroupItem, File, ScanRoot, SimilarGroupItem
 from app.services.decision_service import DecisionService
@@ -164,3 +168,146 @@ def test_hamming_distance_hex() -> None:
     assert hamming_distance_hex("0", "0") == 0
     assert hamming_distance_hex("f", "0") == 4
     assert hamming_distance_hex("ff", "0f") == 4
+
+
+@pytest.mark.parametrize(
+    ("file_name", "payload"),
+    [
+        ("empty.bin", b""),
+        ("tiny.bin", b"a"),
+        ("len-64.bin", bytes(range(64))),
+        ("len-65.bin", bytes(range(65))),
+        ("large.bin", bytes(range(256)) * 32),
+    ],
+)
+def test_compute_file_hashes_matches_legacy_contract(tmp_path: Path, file_name: str, payload: bytes) -> None:
+    target = tmp_path / file_name
+    target.write_bytes(payload)
+
+    expected_blake3 = _legacy_blake3_full_hex(payload)
+    expected_dhash = _legacy_dhash64_hex(payload)
+    expected_phash = _legacy_phash64_hex(payload)
+
+    hash_bundle = compute_file_hashes(target)
+
+    assert hash_bundle.blake3_full == expected_blake3
+    assert hash_bundle.dhash64 == expected_dhash
+    assert hash_bundle.phash64 == expected_phash
+    assert compute_blake3_full_hex(target) == expected_blake3
+    assert compute_dhash64_hex(target) == expected_dhash
+    assert compute_phash64_hex(target) == expected_phash
+
+
+def test_scan_reads_changed_file_once_for_all_hashes(
+    session: Session,
+    tmp_path: Path,
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    dataset_root = tmp_path / "single-pass"
+    dataset_root.mkdir(parents=True, exist_ok=True)
+    target = dataset_root / "sample.jpg"
+    target.write_bytes(bytes(range(256)) * 64)
+
+    root_id = _insert_scan_root(session, path=str(dataset_root))
+    root = session.get(ScanRoot, root_id)
+    assert root is not None
+
+    _insert_scan_job(session, job_id="job-core-read-once", mode="both")
+
+    open_calls = 0
+    read_sizes: list[int] = []
+    original_open = Path.open
+
+    def tracking_open(self: Path, *args, **kwargs):  # type: ignore[no-untyped-def]
+        fh = original_open(self, *args, **kwargs)
+        if self != target:
+            return fh
+
+        nonlocal open_calls
+        open_calls += 1
+        return _TrackedFileHandle(fh, read_sizes)
+
+    monkeypatch.setattr(Path, "open", tracking_open)
+
+    result = scan_and_index(session, job_id="job-core-read-once", roots=[root])
+
+    assert result.files_seen == 1
+    assert result.files_indexed == 1
+    assert open_calls == 1
+    assert sum(read_sizes) == target.stat().st_size
+
+
+class _TrackedFileHandle:
+    def __init__(self, wrapped, read_sizes: list[int]) -> None:  # type: ignore[no-untyped-def]
+        self._wrapped = wrapped
+        self._read_sizes = read_sizes
+
+    def read(self, *args, **kwargs):  # type: ignore[no-untyped-def]
+        chunk = self._wrapped.read(*args, **kwargs)
+        if chunk:
+            self._read_sizes.append(len(chunk))
+        return chunk
+
+    def __enter__(self) -> "_TrackedFileHandle":
+        self._wrapped.__enter__()
+        return self
+
+    def __exit__(self, exc_type, exc, tb) -> None:  # type: ignore[no-untyped-def]
+        self._wrapped.__exit__(exc_type, exc, tb)
+
+    def __getattr__(self, name: str):
+        return getattr(self._wrapped, name)
+
+
+def _legacy_blake3_full_hex(data: bytes) -> str:
+    try:
+        import blake3  # type: ignore[import-not-found]
+
+        hasher = blake3.blake3()
+    except Exception:
+        hasher = hashlib.sha256()
+
+    hasher.update(data)
+    return hasher.hexdigest()
+
+
+def _legacy_dhash64_hex(data: bytes) -> str:
+    if not data:
+        return "0" * 16
+
+    samples = _legacy_sample_bytes(data, 65)
+    value = 0
+    for index in range(64):
+        value <<= 1
+        if samples[index] > samples[index + 1]:
+            value |= 1
+    return f"{value:016x}"
+
+
+def _legacy_phash64_hex(data: bytes) -> str:
+    if not data:
+        return "0" * 16
+
+    samples = _legacy_sample_bytes(data, 64)
+    avg = sum(samples) / float(len(samples))
+    value = 0
+    for sample in samples:
+        value <<= 1
+        if sample >= avg:
+            value |= 1
+    return f"{value:016x}"
+
+
+def _legacy_sample_bytes(data: bytes, sample_count: int) -> list[int]:
+    if len(data) == sample_count:
+        return list(data)
+
+    if len(data) > sample_count:
+        step = len(data) / float(sample_count)
+        return [data[min(int(index * step), len(data) - 1)] for index in range(sample_count)]
+
+    padded = list(data)
+    last_value = data[-1]
+    while len(padded) < sample_count:
+        padded.append(last_value)
+    return padded

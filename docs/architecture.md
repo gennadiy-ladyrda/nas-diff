@@ -69,8 +69,7 @@
 3. Worker читает `scan_roots`, обходит файловую систему NAS.
 4. Для каждого файла:
 - обновляет метаданные в `files`
-- считает `blake3_full` (Exact)
-- считает `dhash64/phash64` (Similar)
+- в одном streaming-pass считает `blake3_full` (Exact) и `dhash64/phash64` (Similar)
 5. После обхода worker собирает группы:
 - `exact_groups` + `exact_group_items`
 - `similar_groups` + `similar_group_items`
